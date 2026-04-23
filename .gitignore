@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Build outputs
+dist/
+build/
+
+# IDE & OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+.gemini/
+.claude/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Temporary files
+archives/
+tests/
+scratch/
+temp/
