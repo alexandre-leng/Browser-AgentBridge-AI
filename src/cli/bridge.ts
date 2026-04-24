@@ -23,6 +23,7 @@ function parseArgs(input: string): string[] {
 function mapCommand(type: string, pParts: string[]): any {
   switch (type) {
     case 'navigate': return { type: 'navigate', payload: { url: pParts[0], autoAnnotate: pParts.includes('--annotate') } };
+    case 'task': return { type: 'agent.task', payload: { goal: pParts.join(' ') } };
     case 'search': return { type: 'agent.search', payload: { query: pParts.join(' ') } };
     case 'hover':
       if (!isNaN(Number(pParts[0]))) return { type: 'agent.hover', payload: { ref: Number(pParts[0]) } };

@@ -7,6 +7,33 @@ import { humanMove, humanType, humanScroll, humanPause, sleep, rand, randInt } f
 import { vision } from './vision.js';
 import { annotateInteractive, accessibilityTree, findByRef, getAgentElements, type AgentElement } from './agent.js';
 
+const COOKIE_SELECTORS = [
+  '#L2AGLb', // Google
+  'button:has-text("Tout accepter")',
+  'button:has-text("Accept all")',
+  'button:has-text("I accept")',
+  'button:has-text("Accorder")',
+  'button:has-text("Autoriser")',
+  'button:has-text("Accepter")',
+  '#accept-cookies',
+  '[aria-label*="Accepter"]',
+  '[aria-label*="Accept all"]'
+];
+
+async function autoAcceptCookies(page: Page) {
+  for (const sel of COOKIE_SELECTORS) {
+    try {
+      const btn = page.locator(sel).first();
+      if (await btn.isVisible({ timeout: 1000 })) {
+        await btn.click();
+        await sleep(500);
+        return true;
+      }
+    } catch { /* ignore */ }
+  }
+  return false;
+}
+
 type Handler = (payload: any) => Promise<any>;
 type Broadcaster = (msg: any) => void;
 
@@ -243,6 +270,18 @@ export function buildHandlers(broadcast: Broadcaster, dispatch?: (type: string, 
           });
         });
         return { type, tables };
+      } else if (type === 'google-maps') {
+        const results = await page.evaluate(() => {
+          // Detect local pack results (the ones with addresses and phones)
+          return Array.from(document.querySelectorAll('[data-result-id], .VwiC3b, .tF2Cxc')).map(el => {
+            const title = el.querySelector('h3, .OSrXXb')?.textContent || '';
+            const phone = el.textContent?.match(/(?:0|\+33|0033)\s*[1-9](?:[\s.-]*\d{2}){4}/)?.[0] || '';
+            const rating = el.querySelector('.K9E9v, .oqST9c')?.textContent || '';
+            const address = el.textContent?.match(/\d+\s+[A-Za-zÀ-ÿ\s'-]+(?:rue|avenue|boulevard|place|chemin|impasse|route|quai|allée)[A-Za-zÀ-ÿ\s'-]+\d{5}/i)?.[0] || '';
+            return { title, phone, rating, address };
+          }).filter(r => r.title && (r.phone || r.address));
+        });
+        return { type, results };
       }
       return { text: await page.evaluate(() => document.body.innerText) };
     },
@@ -497,6 +536,45 @@ export function buildHandlers(broadcast: Broadcaster, dispatch?: (type: string, 
         })).filter(x => x.title && x.url).slice(0, 10);
       });
       return { query, results, url: page.url() };
+    },
+
+    'agent.task': async ({ goal, engine = 'google' }: any) => {
+      const page = await p();
+      const results: any[] = [];
+      
+      // 1. Navigation
+      await page.goto(SEARCH_URLS[engine](goal), { waitUntil: 'domcontentloaded' });
+      
+      // 2. Auto-cookie
+      const cookiesAccepted = await autoAcceptCookies(page);
+      
+      // 3. Wait for results
+      await humanPause(1000, 2000);
+      
+      // 4. Try extract maps/local first
+      const mapsData = await page.evaluate(() => {
+        return Array.from(document.querySelectorAll('[data-result-id], .VwiC3b')).map(el => {
+           const phone = el.textContent?.match(/(?:0|\+33|0033)\s*[1-9](?:[\s.-]*\d{2}){4}/)?.[0];
+           if (phone) return { title: el.querySelector('h3, .OSrXXb')?.textContent, phone };
+           return null;
+        }).filter(Boolean);
+      });
+      
+      // 5. Normal search results
+      const searchData = await page.evaluate(() => {
+        return Array.from(document.querySelectorAll('h3')).map(h => ({
+          title: h.innerText,
+          url: h.closest('a')?.href
+        })).filter(x => x.title && x.url).slice(0, 5);
+      });
+
+      return { 
+        goal, 
+        cookiesAccepted, 
+        localResults: mapsData, 
+        webResults: searchData,
+        summary: `Found ${mapsData.length} local results and ${searchData.length} web results.`
+      };
     },
 
     // --- Human behavior ---

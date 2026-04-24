@@ -138,8 +138,8 @@ document.getElementById('stop').onclick = () => send('vision.stop', {});
 document.getElementById('go').onclick = () => { if ($url.value) send('navigate', { url: $url.value }); };
 $url.addEventListener('keydown', (e) => { if (e.key === 'Enter' && $url.value) send('navigate', { url: $url.value }); });
 
-  updateMeta();
-}
+
+
 
 $takeover.onclick = () => setTakeover(!takeover);
 function setTakeover(on) {
