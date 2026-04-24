@@ -9,8 +9,11 @@ if (typeof browser === 'undefined') {
 
 const CONFIG = {
   GATEWAY_URL: 'ws://localhost:8080/ws/browser-bridge',
-  RECONNECT_DELAY: 5000,
-  MAX_RECONNECT_ATTEMPTS: 10,
+  RECONNECT_BASE_MS: 1000,
+  RECONNECT_MAX_MS: 30000,
+  HEARTBEAT_INTERVAL_MS: 15000,
+  // Si aucune trame serveur reçue depuis ce délai, on coupe et reconnecte.
+  SERVER_SILENCE_TIMEOUT_MS: 40000,
   COMMAND_TIMEOUT: 30000,
   VISION_FPS: 2,
   VISION_QUALITY: 70
@@ -21,7 +24,6 @@ class BrowserBridge {
     this.ws = null;
     this.reconnectAttempts = 0;
     this.isConnected = false;
-    this.pendingCommands = new Map();
     this.sessionData = {
       cookies: {},
       lastSearch: null,
@@ -29,26 +31,63 @@ class BrowserBridge {
     };
     this.visionStream = null;
     this.heartBeatInterval = null;
+    this.serverWatchdog = null;
+    this.lastServerMessageAt = 0;
+    this.reconnectTimer = null;
     // init() removed from here to be called after listeners are set
+  }
+
+  updateBadge() {
+    try {
+      const action = browser.action || browser.browserAction;
+      if (!action) return;
+      const suffix = this.isConnected ? 'green' : 'red';
+      if (action.setIcon) {
+        action.setIcon({
+          path: {
+            16:  `icons/icon16_${suffix}.png`,
+            48:  `icons/icon48_${suffix}.png`,
+            128: `icons/icon128_${suffix}.png`
+          }
+        });
+      }
+      // On retire le badge texte : la couleur de l'icône suffit.
+      if (action.setBadgeText) action.setBadgeText({ text: '' });
+    } catch (e) {}
   }
 
   init() {
     console.log('[OpenClaw Bridge] Initialisation v3.2 (Stable)...');
     this.connect();
     this.setupTabListener();
+
+    // Reprise immédiate quand le réseau revient (utile après veille / Wi-Fi off)
+    if (typeof self !== 'undefined' && self.addEventListener) {
+      self.addEventListener('online', () => {
+        if (!this.isConnected) {
+          console.log('[OpenClaw Bridge] Réseau revenu, reconnexion immédiate');
+          this.scheduleReconnect(0);
+        }
+      });
+    }
   }
 
   connect() {
-    // Nettoyage de l'ancien heartbeat
-    if (this.heartBeatInterval) clearInterval(this.heartBeatInterval);
-    
+    // Annule tout reconnect en attente : on tente maintenant.
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.stopHeartbeat();
+    this.stopServerWatchdog();
+
     try {
       if (this.ws) {
         this.ws.onopen = null;
         this.ws.onmessage = null;
         this.ws.onclose = null;
         this.ws.onerror = null;
-        this.ws.close();
+        try { this.ws.close(); } catch (_) {}
       }
 
       console.log(`[OpenClaw Bridge] Connexion à ${CONFIG.GATEWAY_URL}...`);
@@ -58,9 +97,11 @@ class BrowserBridge {
         console.log('[OpenClaw Bridge] Connecté !');
         this.isConnected = true;
         this.reconnectAttempts = 0;
-        
-        // Démarrer le Heartbeat pour empêcher la suspension MV3
+        this.lastServerMessageAt = Date.now();
+        this.updateBadge();
+
         this.startHeartbeat();
+        this.startServerWatchdog();
 
         this.send({
           type: 'bridge.ready',
@@ -76,8 +117,11 @@ class BrowserBridge {
       };
 
       this.ws.onmessage = (event) => {
+        this.lastServerMessageAt = Date.now();
         try {
           const message = JSON.parse(event.data);
+          // Les acks de heartbeat ne sont qu'un signal de vivacité.
+          if (message.type === 'bridge.heartbeat.ack') return;
           this.handleMessage(message);
         } catch (e) {
           console.error('[OpenClaw Bridge] Erreur parsing message:', e);
@@ -87,41 +131,79 @@ class BrowserBridge {
       this.ws.onclose = (event) => {
         console.log('[OpenClaw Bridge] Déconnecté (code: ' + event.code + ')');
         this.isConnected = false;
+        this.updateBadge();
         this.stopVisionStream();
-        if (this.heartBeatInterval) clearInterval(this.heartBeatInterval);
-        this.reconnect();
+        this.stopHeartbeat();
+        this.stopServerWatchdog();
+        this.scheduleReconnect();
       };
 
+      // onerror : log uniquement. onclose suit toujours et déclenche la reconnexion.
       this.ws.onerror = (error) => {
-        console.error('[OpenClaw Bridge] Erreur WebSocket:', error);
+        console.warn('[OpenClaw Bridge] Erreur WebSocket:', error && error.message);
       };
 
     } catch (e) {
       console.error('[OpenClaw Bridge] Erreur connexion:', e);
-      this.reconnect();
+      this.scheduleReconnect();
     }
   }
 
   startHeartbeat() {
-    // Un ping toutes les 15 secondes pour garder le Service Worker en vie
     this.heartBeatInterval = setInterval(() => {
-      if (this.isConnected && this.ws.readyState === WebSocket.OPEN) {
-        this.ws.send(JSON.stringify({ type: 'bridge.heartbeat', timestamp: Date.now() }));
+      if (this.isConnected && this.ws && this.ws.readyState === WebSocket.OPEN) {
+        try {
+          this.ws.send(JSON.stringify({ type: 'bridge.heartbeat', timestamp: Date.now() }));
+        } catch (e) {
+          // L'envoi a échoué : la socket est probablement morte. Forcer la fermeture.
+          try { this.ws.close(); } catch (_) {}
+        }
       }
-    }, 15000);
+    }, CONFIG.HEARTBEAT_INTERVAL_MS);
   }
 
-  reconnect() {
-    if (this.reconnectAttempts >= CONFIG.MAX_RECONNECT_ATTEMPTS) {
-      console.error('[OpenClaw Bridge] Max tentatives de reconnexion atteint');
-      return;
+  stopHeartbeat() {
+    if (this.heartBeatInterval) {
+      clearInterval(this.heartBeatInterval);
+      this.heartBeatInterval = null;
     }
+  }
 
+  // Détecte un serveur qui ne répond plus (TCP zombie sans FIN).
+  startServerWatchdog() {
+    this.serverWatchdog = setInterval(() => {
+      if (!this.isConnected) return;
+      const silence = Date.now() - this.lastServerMessageAt;
+      if (silence > CONFIG.SERVER_SILENCE_TIMEOUT_MS) {
+        console.warn(`[OpenClaw Bridge] Serveur silencieux ${silence}ms, reset socket`);
+        try { this.ws && this.ws.close(); } catch (_) {}
+      }
+    }, 10000);
+  }
+
+  stopServerWatchdog() {
+    if (this.serverWatchdog) {
+      clearInterval(this.serverWatchdog);
+      this.serverWatchdog = null;
+    }
+  }
+
+  scheduleReconnect(forcedDelay) {
+    if (this.reconnectTimer) return; // déjà programmé
+    let delay;
+    if (typeof forcedDelay === 'number') {
+      delay = forcedDelay;
+    } else {
+      const exp = Math.min(CONFIG.RECONNECT_MAX_MS, CONFIG.RECONNECT_BASE_MS * Math.pow(2, this.reconnectAttempts));
+      const jitter = Math.floor(Math.random() * 1000);
+      delay = exp + jitter;
+    }
     this.reconnectAttempts++;
-    const delay = CONFIG.RECONNECT_DELAY * Math.min(this.reconnectAttempts, 5);
-    console.log(`[OpenClaw Bridge] Reconnexion dans ${delay}ms...`);
-
-    setTimeout(() => this.connect(), delay);
+    console.log(`[OpenClaw Bridge] Reconnexion dans ${delay}ms (tentative ${this.reconnectAttempts})`);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect();
+    }, delay);
   }
 
   send(message) {
@@ -133,9 +215,16 @@ class BrowserBridge {
   }
 
   async handleMessage(message) {
-    console.log('[OpenClaw Bridge] Commande reçue:', message.type);
-
     const { commandId, type, payload = {} } = message;
+
+    // Toute trame sans commandId n'est pas une commande à exécuter
+    // (ack serveur, broadcast non sollicité, etc.). On évite ainsi
+    // d'envoyer un command.result orphelin qui serait relayé vers les dashboards.
+    if (!commandId) {
+      return;
+    }
+
+    console.log('[OpenClaw Bridge] Commande reçue:', type);
 
     try {
       let result;
@@ -186,6 +275,8 @@ class BrowserBridge {
           break;
 
         // === CONTRÔLE SOURIS ===
+        case 'action.click':
+        case 'action.hover':
         case 'mouse.move':
         case 'mouse.click':
         case 'mouse.doubleClick':
@@ -242,6 +333,20 @@ class BrowserBridge {
         case 'dom.select':
         case 'dom.inspect':
         case 'dom.waitFor':
+          result = await this.executeContentAction(type, payload);
+          break;
+
+        // === COMMANDES DOM-CENTRIC (NOUVELLE APPROCHE) ===
+        case 'dom.extract':
+        case 'dom.html':
+        case 'dom.search':
+        case 'dom.goto':
+        case 'dom.find':
+        case 'dom.fillForm':
+        case 'dom.submit':
+        case 'dom.scrollDown':
+        case 'dom.scrollUp':
+        case 'dom.press':
           result = await this.executeContentAction(type, payload);
           break;
 
@@ -314,7 +419,7 @@ class BrowserBridge {
     let searchTitle = '';
     
     try {
-      await this.waitForTabLoad(tab.id, 20000);
+      await this.waitForTabLoad(tab.id, 20000, searchUrl);
       await this.humanDelay(3000, 4000);
       
       // Vérifier que l'onglet existe toujours
@@ -391,28 +496,22 @@ class BrowserBridge {
     }
     
     if (!tab) {
-      // Utiliser l'onglet actif de la fenêtre courante
-      const activeTabs = await browser.tabs.query({ active: true, currentWindow: true });
-      if (activeTabs.length > 0 && options.newTab !== true) {
-        console.log('[OpenClaw Bridge] Navigation dans onglet actif:', activeTabs[0].id);
-        tab = await browser.tabs.update(activeTabs[0].id, { url, active: true });
-      } else {
-        // Créer un nouvel onglet (dernier recours)
-        console.log('[OpenClaw Bridge] Création nouvel onglet');
-        tab = await browser.tabs.create({ url, active: true });
-        createdNew = true;
-      }
+      // OVERRIDE ABSOLU : L'utilisateur exige que la navigation se fasse toujours dans un nouvel onglet.
+      // On ignore options.newTab et on force browser.tabs.create.
+      console.log('[OpenClaw Bridge] Création d\'un NOUVEL onglet (FORCÉ)');
+      tab = await browser.tabs.create({ url, active: true });
+      createdNew = true;
     }
 
-    // Attendre le chargement
+    // Attendre le chargement avec vérification de l'URL cible
     try {
-      await this.waitForTabLoad(tab.id, 20000);
+      await this.waitForTabLoad(tab.id, 20000, url);
     } catch (e) {
-      console.warn('[OpenClaw Bridge] Timeout chargement');
+      console.warn('[OpenClaw Bridge] Timeout ou erreur chargement:', e.message);
     }
 
-    // Petit délai pour le rendu
-    await new Promise(r => setTimeout(r, 1500));
+    // Petit délai pour le rendu et le JS
+    await new Promise(r => setTimeout(r, 1000));
 
     // Récupérer les infos à jour
     let finalTabId = tab.id;
@@ -425,20 +524,22 @@ class BrowserBridge {
       finalUrl = updatedTab.url;
       finalTitle = updatedTab.title || url;
     } catch (e) {
-      console.warn('[OpenClaw Bridge] Onglet non accessible après navigation');
+      console.warn('[OpenClaw Bridge] Onglet non accessible après navigation, recherche alternative...');
       // Essayer de retrouver par URL
       const allTabs = await browser.tabs.query({});
-      const foundTab = allTabs.find(t => t.url === url || t.url?.includes(url.split('/')[2]));
+      const foundTab = allTabs.find(t => t.url === url || (t.url && url && t.url.includes(url.split('?')[0])));
       if (foundTab) {
         finalTabId = foundTab.id;
         finalUrl = foundTab.url;
         finalTitle = foundTab.title || url;
+      } else {
+        return { error: 'Onglet perdu après navigation', url: url };
       }
     }
 
     // Comportement humain optionnel
     if (options.humanBehavior !== false) {
-      await this.humanDelay(500, 1500);
+      await this.humanDelay(800, 1500);
       try {
         await this.humanScroll(finalTabId, options.scrollCount || 1);
       } catch (e) {
@@ -708,8 +809,17 @@ class BrowserBridge {
 
     // Utiliser captureTab avec un ID spécifique, ou l'onglet actif
     let targetTabId = tabId;
+    
     if (!targetTabId) {
-      // Trouver le dernier onglet web (pas about: ou moz-extension:)
+      // Trouver l'onglet actif
+      const activeTabs = await browser.tabs.query({ active: true, currentWindow: true });
+      if (activeTabs.length > 0) {
+        targetTabId = activeTabs[0].id;
+      }
+    }
+
+    if (!targetTabId) {
+      // Fallback: dernier onglet web
       const tabs = await browser.tabs.query({});
       const webTab = tabs
         .filter(t => t.url && (t.url.startsWith('http://') || t.url.startsWith('https://')))
@@ -718,12 +828,28 @@ class BrowserBridge {
     }
 
     if (!targetTabId) {
-      throw new Error('Aucun onglet web trouvé pour screenshot');
+      throw new Error('Aucun onglet web disponible pour screenshot');
     }
 
-    // S'assurer que l'onglet est actif avant de capturer
-    await browser.tabs.update(targetTabId, { active: true });
-    await new Promise(r => setTimeout(r, 500)); // Laisser le rendu se faire
+    // Vérifier si l'onglet est accessible et prêt
+    try {
+      const tab = await browser.tabs.get(targetTabId);
+      if (!tab.url || tab.url.startsWith('about:') || tab.url.startsWith('chrome:')) {
+        throw new Error('L\'onglet est une page système, capture impossible');
+      }
+    } catch (e) {
+      throw new Error('Onglet inaccessible: ' + e.message);
+    }
+
+    // captureVisibleTab capture l'onglet actif de la fenêtre. On n'active la cible
+    // que si elle ne l'est pas déjà — sinon on perturbe l'utilisateur sans raison.
+    {
+      const current = await browser.tabs.get(targetTabId);
+      if (!current.active) {
+        await browser.tabs.update(targetTabId, { active: true });
+        await new Promise(r => setTimeout(r, 500)); // Laisser le rendu se faire
+      }
+    }
 
     const dataUrl = await browser.tabs.captureVisibleTab(null, {
       format,
@@ -974,37 +1100,63 @@ class BrowserBridge {
 
   // === UTILITAIRES ===
 
-  async waitForTabLoad(tabId, timeout = 15000) {
-    // D'abord vérifier si l'onglet est déjà chargé
+  async waitForTabLoad(tabId, timeout = 15000, targetUrl = null) {
+    const startTime = Date.now();
+    const cleanUrl = (u) => u ? u.split('#')[0].split('?')[0] : '';
+    const targetBase = targetUrl ? cleanUrl(targetUrl) : null;
+
+    // D'abord vérifier si l'onglet est déjà chargé et correspond à l'URL cible
     try {
       const tab = await browser.tabs.get(tabId);
       if (tab.status === 'complete' && tab.url && !tab.url.startsWith('about:blank')) {
-        console.log('[OpenClaw Bridge] Onglet déjà chargé:', tab.url);
-        return;
+        // Si on attend une URL spécifique, vérifier si elle est là
+        if (!targetBase || cleanUrl(tab.url).includes(targetBase)) {
+          console.log('[OpenClaw Bridge] Onglet déjà prêt:', tab.url);
+          return;
+        }
       }
-    } catch (e) { /* ignorer, on attend */ }
+    } catch (e) { /* on continue */ }
 
     return new Promise((resolve) => {
       let settled = false;
-      const done = () => {
+      
+      const done = (reason) => {
         if (settled) return;
         settled = true;
         browser.tabs.onUpdated.removeListener(listener);
+        clearInterval(pollInterval);
         clearTimeout(timer);
         resolve();
       };
 
       const timer = setTimeout(() => {
-        console.log('[OpenClaw Bridge] waitForTabLoad timeout, on continue quand même');
-        done();
+        console.warn('[OpenClaw Bridge] waitForTabLoad timeout');
+        done('timeout');
       }, timeout);
 
-      const listener = (updatedTabId, changeInfo) => {
+      const listener = (updatedTabId, changeInfo, tab) => {
         if (updatedTabId === tabId && changeInfo.status === 'complete') {
-          console.log('[OpenClaw Bridge] Onglet chargé:', changeInfo.url || 'ok');
-          done();
+          if (!targetBase || (tab.url && cleanUrl(tab.url).includes(targetBase))) {
+            console.log('[OpenClaw Bridge] Chargement détecté par event:', tab.url || 'ok');
+            done('event');
+          }
         }
       };
+
+      // Polling de secours (certains sites/moteurs peuvent rater l'event 'complete')
+      const pollInterval = setInterval(async () => {
+        try {
+          const tab = await browser.tabs.get(tabId);
+          if (tab.status === 'complete') {
+            if (!targetBase || (tab.url && cleanUrl(tab.url).includes(targetBase))) {
+              console.log('[OpenClaw Bridge] Chargement détecté par polling:', tab.url);
+              done('polling');
+            }
+          }
+        } catch (e) {
+          done('tab_lost');
+        }
+      }, 1000);
 
       browser.tabs.onUpdated.addListener(listener);
     });
@@ -1031,6 +1183,58 @@ class BrowserBridge {
   }
 
   // setupMessageListener removed from class
+
+  async executeDomClick(tabId, payload) {
+    const { selector, text } = payload;
+
+    try {
+      const results = await browser.scripting.executeScript({
+        target: { tabId },
+        func: (selector, text) => {
+          let el = null;
+
+          if (selector) {
+            try { el = document.querySelector(selector); } catch (e) {}
+          }
+
+          if (!el && text) {
+            const elements = Array.from(document.querySelectorAll('a, button, [role="button"]'));
+            el = elements.find(e => {
+              const elText = (e.innerText || e.textContent || e.value || '').trim();
+              return elText.toLowerCase().includes(text.toLowerCase());
+            });
+          }
+
+          if (!el) {
+            return { success: false, error: 'Élément non trouvé' };
+          }
+
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+          const clickEvent = new MouseEvent('click', {
+            bubbles: true,
+            cancelable: true,
+            view: window
+          });
+          el.dispatchEvent(clickEvent);
+          el.click();
+
+          return { 
+            success: true, 
+            element: el.tagName,
+            text: (el.innerText || el.textContent || '').substring(0, 50),
+            href: el.href || null
+          };
+        },
+        args: [selector, text]
+      });
+
+      return results[0]?.result || { success: false, error: 'Script failed' };
+    } catch (e) {
+      console.error('[OpenClaw Bridge] Erreur dom.click:', e.message);
+      return { success: false, error: e.message };
+    }
+  }
   
   handleRuntimeMessage(message, sender, sendResponse) {
     if (message.type === 'bridge.status') {
@@ -1085,25 +1289,24 @@ class BrowserBridge {
         return false;
       }
 
-      // Essayer d'envoyer un message ping pour vérifier si le content script est là
-      try {
-        await browser.tabs.sendMessage(tabId, { type: 'ping' });
-        return true; // Content script déjà injecté
-      } catch (e) {
-        // Content script non injecté, on l'injecte
-      }
-
-      // Injecter le content script manuellement
-      await browser.scripting.executeScript({
+      // Vérifier si le script unifié est présent
+      const checkResult = await browser.scripting.executeScript({
         target: { tabId },
-        files: ['browser-polyfill.js', 'content-enhanced.js']
+        func: () => !!window.__openclaw_unified_loaded
       });
 
-      // Attendre un peu que le script s'initialise
+      if (checkResult[0]?.result) return true;
+
+      // Injecter le content script unifié
+      await browser.scripting.executeScript({
+        target: { tabId },
+        files: ['browser-polyfill.js', 'content.js']
+      });
+
       await new Promise(r => setTimeout(r, 500));
       return true;
     } catch (e) {
-      console.warn('[OpenClaw Bridge] Impossible d\'injecter content script:', e.message);
+      console.warn('[OpenClaw Bridge] Erreur injection:', e.message);
       return false;
     }
   }
@@ -1112,21 +1315,26 @@ class BrowserBridge {
     const { tabId } = payload || {};
     const targetTabId = tabId || (await browser.tabs.query({ active: true, currentWindow: true }))[0]?.id;
 
-    if (!targetTabId) {
-      throw new Error('Aucun onglet actif');
+    if (!targetTabId) throw new Error('Aucun onglet actif');
+
+    // Pour dom.click, utiliser executeScript directement (plus fiable)
+    if (type === 'dom.click') {
+      return await this.executeDomClick(targetTabId, payload);
     }
 
     // S'assurer que le content script est injecté
     const injected = await this.injectContentScript(targetTabId);
     if (!injected) {
-      return { success: false, error: 'Impossible d\'injecter le content script. L\'onglet peut être une page système (about:, moz-extension:, etc.).' };
+      return { success: false, error: 'Impossible d\'injecter le content script sur cette page.' };
     }
 
     try {
+      console.log(`[OpenClaw Bridge] Envoi message à ${targetTabId}:`, type);
       const response = await browser.tabs.sendMessage(targetTabId, {
         type: type,
         payload: payload
       });
+      console.log(`[OpenClaw Bridge] Réponse de ${targetTabId}:`, response);
       return response || { success: true };
     } catch (e) {
       console.warn('[OpenClaw Bridge] Erreur envoi message au content script:', e.message);

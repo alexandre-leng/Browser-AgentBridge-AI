@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "OpenClaw Browser Bridge",
-  "version": "3.2.0",
-  "description": "Bridge entre OpenClaw et Firefox pour recherches et actions web",
+  "version": "3.2.1",
+  "description": "Bridge entre OpenClaw et Chrome pour recherches et actions web",
   "permissions": [
     "activeTab",
     "tabs",
@@ -15,25 +15,25 @@
     "<all_urls>"
   ],
   "background": {
-    "scripts": ["browser-polyfill.js", "background.js"]
+    "service_worker": "background.js"
   },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["browser-polyfill.js", "content-enhanced.js"],
+      "js": ["browser-polyfill.js", "content.js"],
       "run_at": "document_idle"
     }
   ],
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
-      "16": "icons/icon16.png",
-      "48": "icons/icon48.png",
-      "128": "icons/icon128.png"
+      "16": "icons/icon16_red.png",
+      "48": "icons/icon48_red.png",
+      "128": "icons/icon128_red.png"
     }
   },
   "icons": {
-    "16": "icons/icon16.png",
+    "16": "icons/icon16_simplified.svg",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
@@ -42,18 +42,8 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["content.js", "content-enhanced.js", "browser-polyfill.js"],
+      "resources": ["content.js", "browser-polyfill.js"],
       "matches": ["<all_urls>"]
     }
-  ],
-  "browser_specific_settings": {
-    "gecko": {
-      "id": "openclaw-browser-bridge@openclaw",
-      "strict_min_version": "140.0",
-      "data_collection_permissions": {
-        "required": ["none"],
-        "optional": []
-      }
-    }
-  }
+  ]
 }

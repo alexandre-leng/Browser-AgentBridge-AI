@@ -23,3 +23,5 @@ archives/
 tests/
 scratch/
 temp/
+temp_xpi_check/
+logs/

@@ -10,27 +10,27 @@ const path = require('path');
 
 const PORT = 8080;
 const PUBLIC_DIR = path.join(__dirname, 'public');
-const TEMP_DIR = path.join(__dirname, '..', 'temp', 'screenshots');
+const STORAGE_DIR = path.join(__dirname, '..', '..', 'logs', 'screenshots');
 
-// S'assurer que le dossier temporaire existe
-if (!fs.existsSync(TEMP_DIR)) {
-  fs.mkdirSync(TEMP_DIR, { recursive: true });
+// S'assurer que le dossier de stockage existe
+if (!fs.existsSync(STORAGE_DIR)) {
+  fs.mkdirSync(STORAGE_DIR, { recursive: true });
 }
 
 // Fonction de nettoyage
-function cleanTempDir() {
+function cleanStorageDir() {
   console.log('[Server] Nettoyage des captures temporaires...');
-  if (fs.existsSync(TEMP_DIR)) {
-    const files = fs.readdirSync(TEMP_DIR);
+  if (fs.existsSync(STORAGE_DIR)) {
+    const files = fs.readdirSync(STORAGE_DIR);
     for (const file of files) {
-      fs.unlinkSync(path.join(TEMP_DIR, file));
+      fs.unlinkSync(path.join(STORAGE_DIR, file));
     }
   }
 }
 
 // Nettoyage à la fermeture
-process.on('SIGINT', () => { cleanTempDir(); process.exit(); });
-process.on('exit', () => { cleanTempDir(); });
+process.on('SIGINT', () => { cleanStorageDir(); process.exit(); });
+process.on('exit', () => { cleanStorageDir(); });
 
 const clients = new Set();
 
@@ -90,12 +90,13 @@ const wss = new WebSocket.Server({ server, path: '/ws/browser-bridge' });
 
 wss.on('connection', (ws) => {
   ws.clientType = 'unknown';
-  ws.isAlive = true;
+  ws.lastSeen = Date.now();
   clients.add(ws);
-  
-  ws.on('pong', () => { ws.isAlive = true; });
 
   ws.on('message', (data) => {
+    // Toute trame entrante prouve que le client est en vie
+    ws.lastSeen = Date.now();
+
     try {
       // Conversion Buffer -> String si nécessaire
       const messageStr = data.toString();
@@ -108,9 +109,13 @@ wss.on('connection', (ws) => {
         console.log('[Gateway] Extension connectée');
         return;
       }
-      
+
       if (msg.type === 'bridge.heartbeat') {
-        // Ignorer les pings dans le log pour ne pas polluer
+        // Renvoyer un ack permet au client de mesurer la latence et de
+        // détecter un serveur silencieux via son propre watchdog.
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'bridge.heartbeat.ack', timestamp: msg.timestamp }));
+        }
         return;
       }
 
@@ -126,12 +131,32 @@ wss.on('connection', (ws) => {
       if (msg.type === 'command.result' && msg.payload && msg.payload.dataUrl) {
         const base64Data = msg.payload.dataUrl.replace(/^data:image\/\w+;base64,/, "");
         const fileName = `screenshot_${Date.now()}.${msg.payload.format || 'png'}`;
-        const savePath = path.join(TEMP_DIR, fileName);
+        const savePath = path.join(STORAGE_DIR, fileName);
         fs.writeFile(savePath, base64Data, 'base64', (err) => {
-          if (!err) console.log(`[Server] Screenshot sauvegardé temporairement : ${fileName}`);
+          if (err) return;
+          console.log(`[Server] Screenshot sauvegardé temporairement : ${fileName}`);
+          // Nettoyage 100% async pour ne garder que les 50 plus récents
+          fs.readdir(STORAGE_DIR, async (err, files) => {
+            if (err || files.length <= 50) return;
+            try {
+              const stats = await Promise.all(files.map(async name => ({
+                name,
+                time: (await fs.promises.stat(path.join(STORAGE_DIR, name))).mtime.getTime()
+              })));
+              stats.sort((a, b) => b.time - a.time); // plus récent d'abord
+              const toDelete = stats.slice(50);
+              await Promise.all(toDelete.map(f => fs.promises.unlink(path.join(STORAGE_DIR, f.name)).catch(() => {})));
+            } catch (e) {
+              console.warn('[Server] Cleanup screenshots:', e.message);
+            }
+          });
         });
       }
       
+      if (msg.type !== 'bridge.heartbeat' && msg.type !== 'vision.frame') {
+        console.log(`[Relais] ${ws.clientType} -> ${targetType} : ${msg.type}`);
+      }
+
       clients.forEach(client => {
         if (client !== ws && client.readyState === WebSocket.OPEN) {
           // Relayer les commandes vers les extensions, et les résultats/frames vers les dashboards
@@ -144,7 +169,10 @@ wss.on('connection', (ws) => {
       });
 
     } catch (e) {
-      // Ignorer les erreurs de parsing (ex: données binaires non JSON)
+      // Données non-JSON (binaire, message tronqué) : on ne crash pas, mais on trace.
+      if (process.env.DEBUG) {
+        console.warn('[Gateway] Message non-JSON ignoré:', e.message);
+      }
     }
   });
 
@@ -155,14 +183,19 @@ wss.on('connection', (ws) => {
   });
 });
 
-// Nettoyage périodique des connexions mortes
+// Watchdog applicatif : le ping/pong natif n'est pas fiable côté navigateur
+// (l'API WebSocket DOM n'expose pas les frames ping). On se base donc sur
+// l'horodatage du dernier message reçu, alimenté par bridge.heartbeat (15 s côté client).
+const HEARTBEAT_TIMEOUT_MS = 45000;
 const interval = setInterval(() => {
+  const now = Date.now();
   wss.clients.forEach((ws) => {
-    if (ws.isAlive === false) return ws.terminate();
-    ws.isAlive = false;
-    ws.ping();
+    if (now - (ws.lastSeen || 0) > HEARTBEAT_TIMEOUT_MS) {
+      console.warn(`[Gateway] Client ${ws.clientType} silencieux > ${HEARTBEAT_TIMEOUT_MS}ms, terminate`);
+      ws.terminate();
+    }
   });
-}, 30000);
+}, 10000);
 
 wss.on('close', () => clearInterval(interval));
 
