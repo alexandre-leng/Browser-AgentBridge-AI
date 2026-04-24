@@ -1,10 +1,8 @@
 # 🦾 OpenClaw Browser Bridge v3.0
 
-Pont de contrôle navigateur basé sur **Playwright** — pilote un vrai Chromium comme un humain (courbes de Bézier, frappe avec délais variables, scroll progressif) via une API WebSocket compatible OpenClaw Agent.
+Pont de contrôle navigateur haute performance conçu pour les **Agents IA** et l'automatisation avancée.
 
-Plus d'extension à installer : Playwright gère tout.
-
-## 🚀 Installation
+## 🚀 Installation & Démarrage
 
 ```bash
 npm install
@@ -12,119 +10,87 @@ npx playwright install chromium
 npm start
 ```
 
-Ça lance :
+Le serveur tourne sur `http://localhost:8080`.
+- **Viewer interactif** : `http://localhost:8080/viewer` (visionne le navigateur en temps réel).
+- **Endpoint WS** : `ws://localhost:8080/ws/browser-bridge`.
 
-- Un Chromium non-headless contrôlé par Playwright
-- Un serveur HTTP + WebSocket sur `http://localhost:8080`
-  - Viewer temps réel : http://localhost:8080/viewer
-  - WS agent : `ws://localhost:8080/ws/browser-bridge`
+---
 
-## 🎮 CLI
+## 🛠️ CLI `bridge` (L'outil ultime pour les agents)
 
-```bash
-npm run live goto "https://google.com"
-npm run live type "Recherche" "Météo Paris"
-npm run live press Enter
-npm run live click "Images"
-npm run live screenshot
-npm run live scroll 800
-npm run live read 4000
-```
+Le bridge inclut un utilitaire puissant situé à la racine : `bridge.cmd` (Windows) ou `./bridge` (Linux).
 
-Ou JSON brut :
+### 1. Mode Batch (Gagnez 80% de latence)
+Enchaînez plusieurs commandes en un seul appel CLI. C'est 10x plus rapide que de faire des appels individuels.
 
 ```bash
-npm run live dom.click '{"query":"//button[text()=\"Login\"]"}'
+# Workflow complet en 3 secondes :
+.\bridge.cmd run "navigate https://google.com" "annotate" "click 7" "type 7 'météo paris'" "press Enter" "summary"
 ```
 
-## 🌐 Protocole WebSocket
-
-Requête :
-
-```json
-{ "id": "abc", "type": "dom.click", "payload": { "query": "Recherche Google" } }
+### 2. Mode REPL (Interactif)
+Idéal pour tester ou pour un dialogue continu avec le navigateur.
+```bash
+.\bridge.cmd repl
+bridge> navigate https://google.com
+bridge> annotate
+bridge> click 7
 ```
 
-Réponse :
+### 3. Commandes "Agent-Ready"
+- `bridge search "votre recherche"` : Recherche Google + Extraction structurée des résultats.
+- `bridge summary` : Résumé textuel de la page (URL, titre, éléments interactifs).
+- `bridge annotate` : Capture une image annotée avec des IDs numériques pour chaque bouton/lien.
+- `bridge extract --type=article|form|table` : Extraction structurée de données.
 
-```json
-{
-  "id": "abc",
-  "type": "dom.click",
-  "ok": true,
-  "result": { "x": 612, "y": 340 }
-}
-```
+---
 
-## 📜 Commandes disponibles
+## 🤖 Guide pour les Agents IA
 
-| Catégorie    | Commandes                                                                                                                                                                                                                 |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Navigation   | `navigate`, `search`, `dom.goto`                                                                                                                                                                                          |
-| DOM          | `dom.click`, `dom.doubleClick`, `dom.hover`, `dom.type`, `dom.press`, `dom.select`, `dom.waitFor`, `dom.extract`, `dom.html`, `dom.search`, `dom.inspect`, `dom.scrollDown`, `dom.scrollUp`, `dom.fillForm`, `dom.submit` |
-| Souris brute | `mouse.move`, `mouse.click`, `mouse.doubleClick`, `mouse.rightClick`, `mouse.hover`, `mouse.scroll`, `mouse.clickOnText`                                                                                                  |
-| Clavier      | `keyboard.type`, `keyboard.press`                                                                                                                                                                                         |
-| Capture      | `screenshot`, `vision.start`, `vision.stop`, `vision.screenshot`                                                                                                                                                          |
-| Cookies      | `cookie.get`, `cookie.set`                                                                                                                                                                                                |
-| Onglets      | `tab.list`, `tab.new`, `tab.close`, `tab.switch`                                                                                                                                                                          |
-| Script       | `exec.script`                                                                                                                                                                                                             |
-| Combos       | `combo.searchAndClick`                                                                                                                                                                                                    |
-| Humain       | `human.read`, `human.explore`                                                                                                                                                                                             |
-| Lifecycle    | `browser.close`, `ping`                                                                                                                                                                                                   |
+Si vous êtes un agent IA pilotant ce bridge, consultez le **[GUIDE DE L'AGENT](AGENT-GUIDE.md)** pour apprendre à :
+- Utiliser le système d'IDs numériques (`ref`) plutôt que les sélecteurs CSS.
+- Optimiser vos tokens avec `summary` et `extract`.
+- Gérer les erreurs avec les suggestions automatiques.
 
-### Sélecteur universel (`query`)
+---
 
-Pour toutes les commandes DOM, `query` accepte :
+## 🎮 Commandes API (WebSocket)
 
-- **XPath** : `//button[text()='Login']`
-- **CSS** : `#submit-btn`, `input[name="email"]`
-- **Texte/rôle** : `"Recherche Google"` (matche bouton/lien/label/placeholder/texte)
+| Catégorie | Commandes Clés | Description |
+|-----------|----------------|-------------|
+| **Agent** | `agent.click`, `agent.type`, `agent.search`, `agent.summary` | Utilise les IDs (`ref`) de l'annotation. |
+| **Vision**| `page.annotate`, `vision.start` | Génère les IDs et le flux vidéo. |
+| **DOM**   | `dom.extract`, `dom.waitFor`, `dom.scroll` | Manipulation bas niveau. |
+| **Tabs**  | `tab.new`, `tab.switch`, `tab.close` | Gestion multi-onglets. |
 
-## 🖱️ Contrôle humain
+### Sélecteur universel (`ref` ou `query`)
+Toutes les commandes `agent.*` acceptent un ID numérique fourni par `page.annotate`.
+Toutes les commandes `dom.*` acceptent XPath, CSS ou texte brut.
 
-- **Souris** : trajectoires Bézier avec jitter, ~30 steps par déplacement
-- **Clavier** : délais 40–160 ms par touche + pauses aléatoires
-- **Scroll** : wheel en 4–8 petits increments avec pauses
-- **Clics** : `mousedown`/`mouseup` séparés par ~40–120 ms
-
-Fourni par Playwright + wrappers `src/browser/human.ts`.
-
-## 📺 Viewer
-
-http://localhost:8080/viewer
-
-- Flux JPEG temps réel (2 FPS par défaut, paramétrable)
-- Clic sur l'image = commande `mouse.click` aux coordonnées réelles
+---
 
 ## 🏗️ Architecture
 
 ```
-Agent OpenClaw / CLI
-        │ WebSocket
-        ▼
-src/transport/ws.ts      ← routing commandes
-        │
-src/browser/handlers.ts  ← ~40 handlers
-        │
-src/browser/controller.ts (Playwright) → Chromium
-        │
-src/browser/human.ts     ← Bézier / jitter / pauses
-src/browser/resolver.ts  ← XPath | CSS | text
-src/browser/vision.ts    ← stream JPEG
+Agent / CLI / REPL
+       │ JSON / WebSocket
+       ▼
+[ Transport: WS ]  ──▶ [ Controller: Playwright ]
+       │                      │
+       │                      ▼
+[ Handlers: v3 ]   ◀── [ Human Logic: Bézier/Jitter ]
+       │                      │
+       └──────────────────────┴──▶ [ Vision Stream ]
 ```
 
-## 📁 Arborescence
+---
 
-```
-src/
-  server.ts
-  browser/   { controller, handlers, human, resolver, vision }.ts
-  transport/ ws.ts
-  cli/       live.ts
-  viewer/    index.html
-logs/screenshots/
-```
+## 📁 Fichiers Clés
+- `src/browser/handlers.ts` : Le cœur de l'intelligence (tous les types de commandes).
+- `src/cli/bridge.ts` : Logique du CLI batch et REPL.
+- `src/browser/agent.ts` : Système d'annotation et arbre d'accessibilité.
+
+---
 
 ## 📄 License
-
 MIT

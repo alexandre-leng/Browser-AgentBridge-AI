@@ -109,7 +109,7 @@ export function startServer(port = 8080) {
         return;
       }
       const { id, type, payload } = msg;
-      log('info', 'received command', { type, sessionId: payload?.sessionId || 'default' });
+      log('info', 'received command', { type, sessionId: payload?.sessionId || 'default', payload });
       const handler = handlers[type];
       if (!handler) {
         ws.send(JSON.stringify({ id, ok: false, error: `unknown command: ${type}` }));

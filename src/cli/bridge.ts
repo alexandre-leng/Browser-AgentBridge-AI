@@ -1,201 +1,169 @@
 #!/usr/bin/env node
-import WebSocket from 'ws';
+import { WebSocket } from 'ws';
+import readline from 'node:readline';
 
-const URL = process.env.BRIDGE_URL ?? 'ws://localhost:8080/ws/browser-bridge';
+const WS_URL = process.env.BRIDGE_URL || 'ws://localhost:8080/ws/browser-bridge';
 
-const args = process.argv.slice(2);
-const flags = { wait: 0, save: false, quiet: false };
-const cmdArgs: string[] = [];
-
-for (let i = 0; i < args.length; i++) {
-  if (args[i] === '--wait') {
-    flags.wait = Number(args[++i]) || 0;
-  } else if (args[i] === '--save') {
-    flags.save = true;
-  } else if (args[i] === '--quiet') {
-    flags.quiet = true;
-  } else if (args[i] === '--json') {
-    // default
-  } else {
-    cmdArgs.push(args[i]);
+function parseArgs(input: string): string[] {
+  const args: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < input.length; i++) {
+    const c = input[i];
+    if (c === '"') inQuotes = !inQuotes;
+    else if (c === ' ' && !inQuotes) {
+      if (current) args.push(current);
+      current = '';
+    } else current += c;
   }
+  if (current) args.push(current);
+  return args;
 }
 
-if (cmdArgs.length === 0) {
-  console.error('usage: bridge <command> [args...] [flags]');
-  process.exit(1);
-}
-
-const cmd = cmdArgs[0];
-const rest = cmdArgs.slice(1);
-
-let type = '';
-let payload: any = {};
-
-switch (cmd) {
-  case 'navigate':
-    type = 'navigate';
-    payload = { url: rest[0] };
-    break;
-  case 'annotate':
-    type = 'page.annotate';
-    payload = {};
-    break;
-  case 'snapshot':
-    type = 'page.snapshot';
-    payload = {};
-    break;
-  case 'click':
-    type = 'agent.click';
-    payload = { ref: Number(rest[0]) || rest[0] };
-    break;
-  case 'type':
-    type = 'agent.type';
-    payload = { ref: Number(rest[0]) || rest[0], text: rest.slice(1).join(' ') };
-    break;
-  case 'press':
-    type = 'agent.press';
-    payload = { key: rest[0] };
-    break;
-  case 'scroll':
-    type = 'agent.scroll';
-    payload = { amount: Number(rest[0]) || 500 };
-    break;
-  case 'screenshot':
-    type = 'screenshot';
-    payload = {};
-    break;
-  case 'extract':
-    type = 'dom.extract';
-    if (rest[0] === '--type') payload = { type: rest[1] };
-    else payload = {};
-    break;
-  case 'status':
-    type = 'browser.status';
-    payload = {};
-    break;
-  case 'run':
-    type = 'script.execute';
-    const parseArgs = (str: string): string[] => {
-      const parsed = [];
-      let current = '';
-      let inQuotes = false;
-      for (const char of str) {
-        if (char === '"') { inQuotes = !inQuotes; continue; }
-        if (char === ' ' && !inQuotes) {
-          if (current) parsed.push(current);
-          current = '';
-        } else {
-          current += char;
+function mapCommand(type: string, pParts: string[]): any {
+  switch (type) {
+    case 'navigate': return { type: 'navigate', payload: { url: pParts[0], autoAnnotate: pParts.includes('--annotate') } };
+    case 'search': return { type: 'agent.search', payload: { query: pParts.join(' ') } };
+    case 'hover':
+      if (!isNaN(Number(pParts[0]))) return { type: 'agent.hover', payload: { ref: Number(pParts[0]) } };
+      return { type: 'agent.hover', payload: { ref: pParts.join(' ') } };
+    case 'click':
+      if (!isNaN(Number(pParts[0]))) return { type: 'agent.click', payload: { ref: Number(pParts[0]) } };
+      return { type: 'dom.click', payload: { query: pParts.join(' ') } };
+    case 'type':
+      if (!isNaN(Number(pParts[0]))) return { type: 'agent.type', payload: { ref: Number(pParts[0]), text: pParts.slice(1).join(' ') } };
+      return { type: 'dom.type', payload: { query: pParts[0], text: pParts.slice(1).join(' ') } };
+    case 'press': return { type: 'agent.press', payload: { key: pParts[0] } };
+    case 'wait':
+      if (pParts[0] === '--for') {
+        if (pParts[1] === 'text') return { type: 'agent.waitFor', payload: { text: pParts.slice(2).join(' ') } };
+        if (pParts[1] === 'url') return { type: 'agent.waitFor', payload: { url: pParts.slice(2).join(' ') } };
+      }
+      return { type: 'wait', payload: { ms: Number(pParts[0]) || 1000 } };
+    case 'annotate': return { type: 'page.annotate', payload: {} };
+    case 'extract': return { type: 'dom.extract', payload: { type: pParts[0]?.startsWith('--type') ? pParts[0].split('=')[1] : pParts[1] } };
+    case 'status': return { type: 'browser.status', payload: {} };
+    case 'screenshot': return { type: 'screenshot', payload: {} };
+    case 'scroll': return { type: 'dom.scroll', payload: { y: Number(pParts[0]) } };
+    case 'summary': return { type: 'agent.summary', payload: {} };
+    case 'run':
+      return {
+        type: 'script.execute',
+        payload: {
+          commands: pParts.map(s => {
+            const inner = parseArgs(s);
+            return mapCommand(inner[0], inner.slice(1));
+          }).filter(Boolean),
+          returnAllResults: true
         }
-      }
-      if (current) parsed.push(current);
-      return parsed;
-    };
-    const commands = rest.map(rawCmd => {
-      const parts = parseArgs(rawCmd);
-      const c = parts[0];
-      const pParts = parts.slice(1);
-      switch(c) {
-        case 'navigate': return { type: 'navigate', payload: { url: pParts[0] } };
-        case 'annotate': return { type: 'page.annotate', payload: {} };
-        case 'click': return { type: 'agent.click', payload: { ref: Number(pParts[0]) || pParts[0] } };
-        case 'type': return { type: 'agent.type', payload: { ref: Number(pParts[0]) || pParts[0], text: pParts.slice(1).join(' ') } };
-        case 'press': return { type: 'agent.press', payload: { key: pParts[0] } };
-        case 'wait': 
-          if (pParts[0] === '--for') {
-            if (pParts[1] === 'text') return { type: 'agent.waitFor', payload: { text: pParts.slice(2).join(' ') } };
-            if (pParts[1] === 'url') return { type: 'agent.waitFor', payload: { url: pParts.slice(2).join(' ') } };
-          }
-          if (pParts.length === 0) return { type: 'agent.waitFor', payload: {} };
-          return { type: 'wait', payload: { ms: Number(pParts[0]) } };
-        case 'extract':
-          return { type: 'dom.extract', payload: pParts[0] === '--type' ? { type: pParts[1] } : {} };
-        default: return { type: c, payload: {} };
-      }
-    });
-    payload = { commands, returnAllResults: true };
-    break;
-  default:
-    type = cmd;
-    if (rest[0] && rest[0].startsWith('{')) {
-      try { payload = JSON.parse(rest.join(' ')); } catch {}
-    }
-}
-
-if (flags.wait > 0) {
-  if (type === 'script.execute') {
-    payload.commands.push({ type: 'wait', payload: { ms: flags.wait } });
-  } else {
-    payload = { commands: [{ type, payload }, { type: 'wait', payload: { ms: flags.wait } }], returnAllResults: false };
-    type = 'script.execute';
+      };
+    default: return null;
   }
 }
 
-const id = Math.random().toString(36).slice(2);
-const ws = new WebSocket(URL);
-ws.on('open', () => ws.send(JSON.stringify({ id, type, payload })));
-ws.on('message', (data) => {
-  const msg = JSON.parse(data.toString());
-  if (msg.type === 'hello') return;
-  if (msg.id !== id) return;
+async function startRepl() {
+  const ws = new WebSocket(WS_URL);
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout, prompt: 'bridge> ' });
+
+  ws.on('open', () => {
+    console.log('--- Bridge REPL (type "exit" to quit) ---');
+    rl.prompt();
+  });
+
+  ws.on('message', (data) => {
+    const msg = JSON.parse(data.toString());
+    if (msg.type === 'vision.frame' || msg.type === 'hello') return;
+    if (msg.error) console.log('Error:', msg.error);
+    else console.log(JSON.stringify(msg.result || msg, null, 2));
+    rl.prompt();
+  });
+
+  ws.on('error', (err) => { console.log('Connection error:', err.message); process.exit(1); });
+
+  rl.on('line', (line) => {
+    const cmd = line.trim();
+    if (!cmd) { rl.prompt(); return; }
+    if (cmd === 'exit' || cmd === 'quit') { ws.close(); rl.close(); return; }
+    const parts = parseArgs(cmd);
+    const command = mapCommand(parts[0], parts.slice(1));
+    if (command) ws.send(JSON.stringify({ id: Math.random().toString(36).slice(2), ...command }));
+    else { console.log('Unknown command'); rl.prompt(); }
+  });
+}
+
+async function main() {
+  const args = process.argv.slice(2);
+  const flags = { 
+    quiet: args.includes('--quiet'),
+    help: args.includes('--help')
+  };
+  const filteredArgs = args.filter(a => a !== '--quiet' && a !== '--help');
   
-  if (msg.ok) {
-    let res = msg.result ?? {};
-    const out: any = { ok: true };
-    
-    const targetType = type === 'script.execute' && !payload.returnAllResults ? payload.commands[0].type : type;
-    const targetRes = type === 'script.execute' && !payload.returnAllResults ? res.finalResult : res;
-
-    if (targetType === 'page.annotate') {
-      out.elements = targetRes.elements?.length || 0;
-      out.image = targetRes.imageUrl;
-      out.url = targetRes.url;
-      out.title = targetRes.title;
-      if (targetRes.elements) {
-        out.top = targetRes.elements.slice(0, 5).map((e: any) => ({ id: e.id, role: e.role, name: e.name }));
-      }
-    } else if (targetType === 'page.snapshot') {
-      out.elements = targetRes.tree?.length || 0;
-      out.url = targetRes.url;
-      out.title = targetRes.title;
-    } else if (targetType === 'agent.click') {
-       out.clicked = targetRes.clicked;
-       out.ref = targetRes.ref ?? payload.ref;
-    } else if (targetType === 'agent.type') {
-       out.typed = targetRes.typed;
-       out.ref = targetRes.ref ?? payload.ref;
-    } else if (targetType === 'agent.press') {
-       out.key = targetRes.key;
-       out.navigated = true; 
-    } else if (type === 'script.execute' && payload.returnAllResults) {
-       out.results = res.allResults?.map((r:any) => ({ step: r.step, type: r.type, ok: !r.error }));
-       out.finalResult = res.finalResult?.imageUrl ? { image: res.finalResult.imageUrl } : res.finalResult;
-       out.durationMs = res.durationMs;
-    } else {
-       Object.assign(out, targetRes);
-    }
-
-    if (out.imageB64) delete out.imageB64;
-    
-    if (flags.quiet) {
-      console.log(JSON.stringify({ ok: true }));
-    } else {
-      console.log(JSON.stringify(out));
-    }
-    ws.close();
-    process.exit(0);
-  } else {
-    console.error(JSON.stringify({ ok: false, error: msg.error }));
-    ws.close();
-    process.exit(2);
+  if (filteredArgs[0] === 'repl') {
+    return startRepl();
   }
-});
-ws.on('error', (err) => {
-  console.error(JSON.stringify({ ok: false, error: err.message }));
-  process.exit(1);
-});
-setTimeout(() => {
-  console.error(JSON.stringify({ ok: false, error: 'timeout' }));
-  process.exit(3);
-}, 60000);
+
+  const ws = new WebSocket(WS_URL);
+  const type = filteredArgs[0];
+  const payloadParts = filteredArgs.slice(1);
+  const command = mapCommand(type, payloadParts);
+
+  if (!command) {
+    console.error(JSON.stringify({ ok: false, error: `Unknown command: ${type}` }));
+    process.exit(1);
+  }
+
+  ws.on('open', () => {
+    ws.send(JSON.stringify({ id: 'cli', ...command }));
+  });
+
+  ws.on('message', (data) => {
+    const msg = JSON.parse(data.toString());
+    if (msg.type === 'vision.frame' || msg.type === 'hello') return;
+    
+    if (msg.ok) {
+      const res = msg.result;
+      let out: any = { ok: true };
+      
+      if (command.type === 'script.execute') {
+        out.results = res.allResults?.map((r: any) => {
+          const entry: any = { step: r.step, type: r.type, ok: !r.error };
+          if (r.error) entry.error = r.error;
+          if (r.result) {
+            if (r.type === 'page.annotate') entry.elements = r.result.elements?.length;
+            if (r.type === 'agent.click') entry.clicked = r.result.clicked;
+            if (r.type === 'navigate') entry.title = r.result.title;
+            if (r.type === 'agent.summary') entry.summary = r.result.summary;
+            if (r.type === 'dom.extract') entry.data = r.result;
+            if (r.type === 'agent.press') entry.navigated = r.result.navigated;
+          }
+          return entry;
+        });
+        out.durationMs = res.durationMs;
+      } else {
+        Object.assign(out, res);
+      }
+      
+      delete out.imageB64;
+      console.log(JSON.stringify(out, null, flags.quiet ? 0 : 2));
+      ws.close();
+      process.exit(0);
+    } else {
+      console.error(JSON.stringify({ ok: false, error: msg.error }));
+      ws.close();
+      process.exit(2);
+    }
+  });
+
+  ws.on('error', (err) => {
+    console.error(JSON.stringify({ ok: false, error: err.message }));
+    process.exit(1);
+  });
+
+  setTimeout(() => {
+    console.error(JSON.stringify({ ok: false, error: 'timeout' }));
+    process.exit(3);
+  }, 30000);
+}
+
+main();

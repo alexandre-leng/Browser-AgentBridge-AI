@@ -5,7 +5,7 @@ import { controller, sessionStore } from './controller.js';
 import { resolve, resolveVisible } from './resolver.js';
 import { humanMove, humanType, humanScroll, humanPause, sleep, rand, randInt } from './human.js';
 import { vision } from './vision.js';
-import { annotateInteractive, accessibilityTree, findByRef } from './agent.js';
+import { annotateInteractive, accessibilityTree, findByRef, getAgentElements, type AgentElement } from './agent.js';
 
 type Handler = (payload: any) => Promise<any>;
 type Broadcaster = (msg: any) => void;
@@ -28,13 +28,14 @@ async function centerOf(page: Page, query: string) {
 }
 
 export function buildHandlers(broadcast: Broadcaster, dispatch?: (type: string, payload: any) => Promise<any>): Record<string, Handler> {
-  const getEl = async (ref: any, retry = true) => {
+  const getEl = async (ref: any, retry = true): Promise<AgentElement> => {
     const sessionId = sessionStore.getStore();
     let el = findByRef(ref, sessionId);
     if (!el && retry) {
       await annotateInteractive(await p(), sessionId);
       el = findByRef(ref, sessionId);
     }
+    if (!el) throw new Error(`Element not found: ${ref}`);
     return el;
   };
 
@@ -190,8 +191,13 @@ export function buildHandlers(broadcast: Broadcaster, dispatch?: (type: string, 
       return { ok: true };
     },
 
-    wait: async ({ ms }: any) => {
-      await sleep(Number(ms || 1000));
+    'wait': async ({ ms }: any) => {
+      const page = await p();
+      if (!ms) {
+        await page.waitForLoadState('load', { timeout: 5000 }).catch(() => {});
+        return { waited: 'load' };
+      }
+      await sleep(Number(ms));
       return { ok: true, waited: ms };
     },
 
@@ -218,6 +224,25 @@ export function buildHandlers(broadcast: Broadcaster, dispatch?: (type: string, 
           }));
         });
         return { type, fields };
+      } else if (type === 'article') {
+        const article = await page.evaluate(() => {
+          const title = document.querySelector('h1')?.innerText || document.title;
+          const content = Array.from(document.querySelectorAll('p, h2, h3'))
+            .map(el => el.textContent?.trim())
+            .filter(Boolean)
+            .join('\n\n')
+            .slice(0, 5000);
+          return { title, content };
+        });
+        return { type, article };
+      } else if (type === 'table') {
+        const tables = await page.evaluate(() => {
+          return Array.from(document.querySelectorAll('table')).map(table => {
+            const rows = Array.from(table.querySelectorAll('tr')).slice(0, 20);
+            return rows.map(tr => Array.from(tr.querySelectorAll('td, th')).map(td => td.textContent?.trim()));
+          });
+        });
+        return { type, tables };
       }
       return { text: await page.evaluate(() => document.body.innerText) };
     },
@@ -460,6 +485,20 @@ export function buildHandlers(broadcast: Broadcaster, dispatch?: (type: string, 
       return { clicked: query };
     },
 
+    'agent.search': async ({ query, engine = 'google' }: any) => {
+      const page = await p();
+      await page.goto(SEARCH_URLS[engine](query), { waitUntil: 'domcontentloaded' });
+      await humanPause(1000, 2000);
+      const results = await page.evaluate(() => {
+        return Array.from(document.querySelectorAll('h3')).map(h => ({
+          title: h.innerText,
+          url: h.closest('a')?.href || h.parentElement?.querySelector('a')?.href,
+          snippet: h.parentElement?.innerText?.slice(0, 300)
+        })).filter(x => x.title && x.url).slice(0, 10);
+      });
+      return { query, results, url: page.url() };
+    },
+
     // --- Human behavior ---
     'human.read': async ({ durationMs = 4000 }: any = {}) => {
       const page = await p();
@@ -519,8 +558,21 @@ export function buildHandlers(broadcast: Broadcaster, dispatch?: (type: string, 
       throw new Error('Failed to annotate after multiple retries due to navigation');
     },
 
-    // Compact accessibility tree (role + name, no bounding boxes).
-    'page.snapshot': async () => {
+    'agent.summary': async () => {
+      const page = await p();
+      const tree = await accessibilityTree(page);
+      const url = page.url();
+      const title = await page.title();
+      return { 
+        url, 
+        title, 
+        summary: `Page: ${title}\nURL: ${url}\nInteractive elements: ${tree.length}`,
+        topElements: tree.slice(0, 15) 
+      };
+    },
+
+    // Returns the accessibility tree (role + name) of the page.
+    'agent.tree': async () => {
       const page = await p();
       const tree = await accessibilityTree(page);
       return { url: page.url(), title: await page.title(), tree };
@@ -530,59 +582,46 @@ export function buildHandlers(broadcast: Broadcaster, dispatch?: (type: string, 
     // Falls back to semantic resolver if ref is a string not found in cache.
     'agent.click': async ({ ref, double = false, retry = true }) => {
       const page = await p();
-      const el = await getEl(ref, retry);
-      if (el) {
-        const x = el.box.x + Math.round(el.box.w / 2);
-        const y = el.box.y + Math.round(el.box.h / 2);
-        await humanMove(page, x, y);
-        await sleep(rand(50, 130));
-        if (double) {
-          await page.mouse.dblclick(x, y);
-        } else {
-          await page.mouse.click(x, y, { delay: randInt(40, 110) });
-        }
-        return { clicked: el.name || el.role, ref, x, y };
-      }
-      if (typeof ref === 'string') {
-        const { x, y } = await centerOf(page, ref);
-        await humanMove(page, x, y);
-        await sleep(rand(50, 130));
+      const sessionId = sessionStore.getStore() || 'default';
+      const el = await getEl(ref, retry).catch(async (err: Error) => {
+        const available = getAgentElements(sessionId).map((e: AgentElement) => `${e.id}: ${e.name}`).slice(0, 10).join(', ');
+        throw new Error(`${err.message}. Available elements: ${available}...`);
+      });
+      const x = el.box.x + Math.round(el.box.w / 2);
+      const y = el.box.y + Math.round(el.box.h / 2);
+      await humanMove(page, x, y);
+      await sleep(rand(50, 130));
+      if (double) {
+        await page.mouse.dblclick(x, y);
+      } else {
         await page.mouse.click(x, y, { delay: randInt(40, 110) });
-        return { clicked: ref, x, y };
       }
-      throw new Error(`agent.click: element not found — ref: ${ref}`);
+      return { clicked: el.name || el.role, ref, x, y };
     },
 
     // Type text into an element identified by ref (number or description).
     // Clears existing content first if clearFirst is true (default).
-    'agent.type': async ({ ref, text, clearFirst = true, retry = true }) => {
+    'agent.type': async ({ ref, text, clearFirst = true, retry = true }: any) => {
       const page = await p();
       const val = String(text ?? '');
-      const el = await getEl(ref, retry);
-      if (el) {
-        const x = el.box.x + Math.round(el.box.w / 2);
-        const y = el.box.y + Math.round(el.box.h / 2);
-        await humanMove(page, x, y);
-        await page.mouse.click(x, y, { delay: randInt(30, 80) });
-        await humanPause(80, 200);
-        if (clearFirst) {
-          await page.keyboard.press('Control+a');
-          await sleep(rand(30, 80));
-          await page.keyboard.press('Delete');
-          await sleep(rand(30, 60));
-        }
-        await humanType(page, val);
-        return { typed: val.length, ref };
+      const sessionId = sessionStore.getStore() || 'default';
+      const el = await getEl(ref, retry).catch(async (err: Error) => {
+        const available = getAgentElements(sessionId).map((e: AgentElement) => `${e.id}: ${e.name}`).slice(0, 10).join(', ');
+        throw new Error(`${err.message}. Available elements: ${available}...`);
+      });
+      const x = el.box.x + Math.round(el.box.w / 2);
+      const y = el.box.y + Math.round(el.box.h / 2);
+      await humanMove(page, x, y);
+      await page.mouse.click(x, y, { delay: randInt(30, 80) });
+      await humanPause(80, 200);
+      if (clearFirst) {
+        await page.keyboard.press('Control+a');
+        await sleep(rand(30, 80));
+        await page.keyboard.press('Delete');
+        await sleep(rand(30, 60));
       }
-      if (typeof ref === 'string') {
-        const loc = await resolveVisible(page, ref);
-        await loc.click();
-        await humanPause(80, 200);
-        if (clearFirst) await loc.fill('');
-        await humanType(page, val);
-        return { typed: val.length };
-      }
-      throw new Error(`agent.type: element not found — ref: ${ref}`);
+      await humanType(page, val);
+      return { typed: val.length, ref };
     },
 
     // Press a key (Enter, Tab, Escape, ArrowDown, …) optionally on a focused element.
@@ -600,13 +639,24 @@ export function buildHandlers(broadcast: Broadcaster, dispatch?: (type: string, 
       }
       await page.keyboard.press(String(key));
       
+      let navigated = false;
       if (key === 'Enter') {
         try {
-          await page.waitForLoadState('domcontentloaded', { timeout: 3000 });
+          // Wait for a bit to see if navigation starts
+          await Promise.race([
+            page.waitForLoadState('domcontentloaded', { timeout: 4000 }),
+            sleep(1000)
+          ]);
+          navigated = page.url() !== beforeUrl;
         } catch { /* ignored */ }
       }
       
-      return { key, navigated: page.url() !== beforeUrl, url: page.url() };
+      return { 
+        key, 
+        navigated, 
+        url: page.url(), 
+        title: await page.title().catch(() => '') 
+      };
     },
 
     // Scroll the viewport. direction: 'down'|'up'|'left'|'right', amount in px.
@@ -639,19 +689,15 @@ export function buildHandlers(broadcast: Broadcaster, dispatch?: (type: string, 
     // Hover over an element (useful before annotating dynamic menus).
     'agent.hover': async ({ ref, retry = true }: any) => {
       const page = await p();
-      const el = await getEl(ref, retry);
-      if (el) {
-        const x = el.box.x + Math.round(el.box.w / 2);
-        const y = el.box.y + Math.round(el.box.h / 2);
-        await humanMove(page, x, y);
-        return { hovered: el.name || el.role };
-      }
-      if (typeof ref === 'string') {
-        const { x, y } = await centerOf(page, ref);
-        await humanMove(page, x, y);
-        return { hovered: ref };
-      }
-      throw new Error(`agent.hover: element not found — ref: ${ref}`);
+      const sessionId = sessionStore.getStore() || 'default';
+      const el = await getEl(ref, retry).catch(async (err: Error) => {
+        const available = getAgentElements(sessionId).map((e: AgentElement) => `${e.id}: ${e.name}`).slice(0, 10).join(', ');
+        throw new Error(`${err.message}. Available elements: ${available}...`);
+      });
+      const x = el.box.x + Math.round(el.box.w / 2);
+      const y = el.box.y + Math.round(el.box.h / 2);
+      await humanMove(page, x, y);
+      return { hovered: el.name || el.role, ref };
     },
 
     // Select an option in a <select> by visible text or value.
