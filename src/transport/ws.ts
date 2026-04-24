@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { join, extname } from 'node:path';
 import { WebSocketServer, WebSocket } from 'ws';
 import { buildHandlers } from '../browser/handlers.js';
+import { sessionStore } from '../browser/controller.js';
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -19,9 +20,16 @@ export function startServer(port = 8080) {
     const data = JSON.stringify(msg);
     for (const c of clients) if (c.readyState === WebSocket.OPEN) c.send(data);
   };
-  const handlers = buildHandlers(broadcast);
+  const handlers: Record<string, any> = {};
+  const dispatch = async (type: string, payload: any) => {
+    const h = handlers[type];
+    if (!h) throw new Error(`unknown command: ${type}`);
+    return h(payload);
+  };
+  Object.assign(handlers, buildHandlers(broadcast, dispatch));
 
   const viewerDir = join(process.cwd(), 'src', 'viewer');
+  const capturesDir = join(process.cwd(), 'logs', 'screenshots');
 
   const http = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     try {
@@ -35,6 +43,14 @@ export function startServer(port = 8080) {
       if (url.startsWith('/viewer/')) {
         const file = url.replace(/^\/viewer\//, '');
         const p = join(viewerDir, file);
+        const data = await readFile(p);
+        res.writeHead(200, { 'Content-Type': MIME[extname(p)] ?? 'application/octet-stream' });
+        res.end(data);
+        return;
+      }
+      if (url.startsWith('/captures/')) {
+        const file = url.replace(/^\/captures\//, '');
+        const p = join(capturesDir, file);
         const data = await readFile(p);
         res.writeHead(200, { 'Content-Type': MIME[extname(p)] ?? 'application/octet-stream' });
         res.end(data);
@@ -72,7 +88,10 @@ export function startServer(port = 8080) {
         return;
       }
       try {
-        const result = await handler(payload ?? {});
+        const payloadObj = payload ?? {};
+        const result = await sessionStore.run(payloadObj.sessionId, async () => {
+          return await handler(payloadObj);
+        });
         ws.send(JSON.stringify({ id, type, ok: true, result }));
       } catch (err: any) {
         ws.send(JSON.stringify({ id, type, ok: false, error: err?.message ?? String(err) }));

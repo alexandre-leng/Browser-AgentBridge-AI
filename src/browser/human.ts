@@ -48,11 +48,12 @@ export async function humanType(page: Page, text: string) {
   }
 }
 
-export async function humanScroll(page: Page, deltaY: number) {
+export async function humanScroll(page: Page, deltaY: number, deltaX = 0) {
   const steps = randInt(4, 8);
-  const perStep = deltaY / steps;
   for (let i = 0; i < steps; i++) {
-    await page.mouse.wheel(0, perStep + rand(-10, 10));
+    const dx = deltaX !== 0 ? deltaX / steps + rand(-2, 2) : 0;
+    const dy = deltaY !== 0 ? deltaY / steps + rand(-10, 10) : 0;
+    await page.mouse.wheel(dx, dy);
     await sleep(rand(60, 160));
   }
 }

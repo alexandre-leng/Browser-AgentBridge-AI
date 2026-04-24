@@ -1,7 +1,7 @@
 import { writeFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Page } from 'playwright';
-import { controller } from './controller.js';
+import { controller, sessionStore } from './controller.js';
 import { resolve, resolveVisible } from './resolver.js';
 import { humanMove, humanType, humanScroll, humanPause, sleep, rand, randInt } from './human.js';
 import { vision } from './vision.js';
@@ -17,7 +17,7 @@ const SEARCH_URLS: Record<string, (q: string) => string> = {
 };
 
 async function p(): Promise<Page> {
-  return controller.page();
+  return controller.page(sessionStore.getStore());
 }
 
 async function centerOf(page: Page, query: string) {
@@ -27,8 +27,97 @@ async function centerOf(page: Page, query: string) {
   return { x: box.x + box.width / 2, y: box.y + box.height / 2, loc };
 }
 
-export function buildHandlers(broadcast: Broadcaster): Record<string, Handler> {
+export function buildHandlers(broadcast: Broadcaster, dispatch?: (type: string, payload: any) => Promise<any>): Record<string, Handler> {
   return {
+    // --- Sessions ---
+    'session.create': async ({ sessionId, headless }: any) => {
+      await controller.launch({ headless }, sessionId);
+      return { sessionId, ok: true };
+    },
+    'session.list': async () => {
+      return { sessions: controller.listSessions() };
+    },
+    'browser.status': async () => {
+      try {
+        const page = await p();
+        return {
+          ok: true,
+          url: page.url(),
+          title: await page.title().catch(() => ''),
+          loading: false,
+          sessionId: sessionStore.getStore()
+        };
+      } catch (e: any) {
+        return { ok: false, error: e.message };
+      }
+    },
+
+    // --- Scripts ---
+    'script.execute': async ({ commands, stopOnError = true, returnAllResults = false }: any) => {
+      if (!dispatch) throw new Error('dispatch not available');
+      const allResults = [];
+      let finalResult = null;
+      let step = 0;
+      const t0 = Date.now();
+      
+      const resolveVars = (obj: any, context: any): any => {
+        if (typeof obj === 'string') {
+          return obj.replace(/\$\{step(\d+)\.([^}]+)\}/g, (_, stepIdx, path) => {
+            const res = context[Number(stepIdx)];
+            if (!res) return _;
+            let val = res.result;
+            for (const p of path.split(/[.\[\]]+/).filter(Boolean)) {
+              if (val === undefined || val === null) break;
+              val = val[p];
+            }
+            return val ?? _;
+          });
+        }
+        if (Array.isArray(obj)) return obj.map(v => resolveVars(v, context));
+        if (obj && typeof obj === 'object') {
+          const res: any = {};
+          for (const [k, v] of Object.entries(obj)) res[k] = resolveVars(v, context);
+          return res;
+        }
+        return obj;
+      };
+
+      for (let cmd of commands) {
+        try {
+          const payload = resolveVars(cmd.payload ?? {}, allResults);
+          finalResult = await dispatch(cmd.type, payload);
+          allResults.push({ step, type: cmd.type, result: finalResult });
+        } catch (err: any) {
+          if (stopOnError) throw new Error(`Script failed at step ${step} (${cmd.type}): ${err.message}`);
+          allResults.push({ step, type: cmd.type, error: err.message });
+        }
+        step++;
+      }
+      return {
+        finalResult,
+        ...(returnAllResults ? { allResults } : {}),
+        durationMs: Date.now() - t0,
+        stepsExecuted: step
+      };
+    },
+
+    // --- Agent ---
+    'agent.task': async ({ goal, url, maxSteps = 10, onAmbiguity = 'ask' }: any) => {
+      if (!dispatch) throw new Error('dispatch not available');
+      const steps = [];
+      if (url) {
+        await dispatch('navigate', { url });
+        steps.push({ action: 'navigate', url });
+      }
+      // Simple MVP: we just annotate and return to simulate agent capabilities for now.
+      const ann = await dispatch('page.annotate', {});
+      return {
+        success: true,
+        steps,
+        summary: `Goal received: "${goal}". This is a MVP agent task. Please use script.execute for deterministic behavior, or implement full LLM loop server-side.`,
+        annotation: ann
+      };
+    },
     // --- Navigation ---
     navigate: async ({ url, waitUntil = 'domcontentloaded' }) => {
       const page = await p();
@@ -45,9 +134,9 @@ export function buildHandlers(broadcast: Broadcaster): Record<string, Handler> {
     },
 
     // --- DOM actions ---
-    'dom.click': async ({ query, selector }) => {
+    'dom.click': async ({ query, selector, text }) => {
       const page = await p();
-      const q = query ?? selector;
+      const q = query ?? selector ?? text;
       const { x, y } = await centerOf(page, q);
       await humanMove(page, x, y);
       await sleep(rand(50, 150));
@@ -55,17 +144,17 @@ export function buildHandlers(broadcast: Broadcaster): Record<string, Handler> {
       return { clicked: q, x, y };
     },
 
-    'dom.doubleClick': async ({ query, selector }) => {
+    'dom.doubleClick': async ({ query, selector, text }) => {
       const page = await p();
-      const { x, y } = await centerOf(page, query ?? selector);
+      const { x, y } = await centerOf(page, query ?? selector ?? text);
       await humanMove(page, x, y);
       await page.mouse.dblclick(x, y);
       return { ok: true };
     },
 
-    'dom.hover': async ({ query, selector }) => {
+    'dom.hover': async ({ query, selector, text }) => {
       const page = await p();
-      const { x, y } = await centerOf(page, query ?? selector);
+      const { x, y } = await centerOf(page, query ?? selector ?? text);
       await humanMove(page, x, y);
       return { x, y };
     },
@@ -89,17 +178,22 @@ export function buildHandlers(broadcast: Broadcaster): Record<string, Handler> {
       return { key };
     },
 
-    'dom.select': async ({ query, selector, value }) => {
+    'dom.select': async ({ query, selector, text, value }) => {
       const page = await p();
-      const loc = await resolveVisible(page, query ?? selector);
+      const loc = await resolveVisible(page, query ?? selector ?? text);
       const res = await loc.selectOption(value);
       return { selected: res };
     },
 
-    'dom.waitFor': async ({ query, selector, state = 'visible', timeout = 10000 }) => {
+    'dom.waitFor': async ({ query, selector, text, state = 'visible', timeout = 10000 }) => {
       const page = await p();
-      await resolve(page, query ?? selector).waitFor({ state, timeout });
+      await resolve(page, query ?? selector ?? text).waitFor({ state, timeout });
       return { ok: true };
+    },
+
+    wait: async ({ ms }: any) => {
+      await sleep(Number(ms || 1000));
+      return { ok: true, waited: ms };
     },
 
     'dom.extract': async () => {
@@ -154,8 +248,8 @@ export function buildHandlers(broadcast: Broadcaster): Record<string, Handler> {
 
     'dom.fillForm': async ({ fields }) => {
       const page = await p();
-      for (const { query, selector, value } of fields) {
-        const loc = await resolveVisible(page, query ?? selector);
+      for (const { query, selector, text, value } of fields) {
+        const loc = await resolveVisible(page, query ?? selector ?? text);
         await loc.click();
         await humanType(page, String(value));
         await humanPause(150, 400);
@@ -218,8 +312,7 @@ export function buildHandlers(broadcast: Broadcaster): Record<string, Handler> {
       return { ok: true };
     },
     'mouse.scroll': async ({ y = 0, x = 0 }) => {
-      await humanScroll(await p(), y);
-      void x;
+      await humanScroll(await p(), y, x);
       return { ok: true };
     },
     'mouse.clickOnText': async ({ text }) => {
@@ -257,9 +350,12 @@ export function buildHandlers(broadcast: Broadcaster): Record<string, Handler> {
       await mkdir(dir, { recursive: true });
       const ts = new Date().toISOString().replace(/[:.]/g, '-');
       const ext = format === 'jpeg' || format === 'jpg' ? 'jpg' : 'png';
-      const path = join(dir, `${ts}.${ext}`);
+      const filename = `${ts}.${ext}`;
+      const path = join(dir, filename);
       const buf = await page.screenshot({ path, type: ext === 'jpg' ? 'jpeg' : 'png', fullPage });
-      return { path, dataUrl: `data:image/${ext};base64,${buf.toString('base64')}` };
+      const port = process.env.PORT ?? 8080;
+      const imageUrl = `http://localhost:${port}/captures/${filename}`;
+      return { path, imageUrl, dataUrl: `data:image/${ext};base64,${buf.toString('base64')}` };
     },
 
     // --- Vision stream ---
@@ -279,15 +375,15 @@ export function buildHandlers(broadcast: Broadcaster): Record<string, Handler> {
     },
 
     // --- Cookies ---
-    'cookie.get': async ({ urls }: any = {}) => ({ cookies: await controller.ctx().cookies(urls) }),
+    'cookie.get': async ({ urls }: any = {}) => ({ cookies: await controller.ctx(sessionStore.getStore()).cookies(urls) }),
     'cookie.set': async ({ cookies }) => {
-      await controller.ctx().addCookies(cookies);
+      await controller.ctx(sessionStore.getStore()).addCookies(cookies);
       return { ok: true };
     },
 
     // --- Tabs ---
     'tab.list': async () => {
-      const pages = controller.ctx().pages();
+      const pages = controller.ctx(sessionStore.getStore()).pages();
       return {
         tabs: await Promise.all(
           pages.map(async (pg, i) => ({ index: i, url: pg.url(), title: await pg.title().catch(() => '') })),
@@ -295,7 +391,7 @@ export function buildHandlers(broadcast: Broadcaster): Record<string, Handler> {
       };
     },
     'tab.close': async ({ tabId, index }) => {
-      const pages = controller.ctx().pages();
+      const pages = controller.ctx(sessionStore.getStore()).pages();
       const idx = typeof tabId === 'number' ? tabId : index;
       const pg = pages[idx];
       if (!pg) throw new Error('tab not found');
@@ -303,23 +399,27 @@ export function buildHandlers(broadcast: Broadcaster): Record<string, Handler> {
       return { ok: true };
     },
     'tab.switch': async ({ index }) => {
-      const pg = controller.ctx().pages()[index];
+      const pg = controller.ctx(sessionStore.getStore()).pages()[index];
       if (!pg) throw new Error('tab not found');
-      controller.setActivePage(pg);
+      controller.setActivePage(pg, sessionStore.getStore());
       await pg.bringToFront();
       return { url: pg.url() };
     },
     'tab.new': async ({ url }: any = {}) => {
-      const pg = await controller.ctx().newPage();
-      controller.setActivePage(pg);
+      const pg = await controller.ctx(sessionStore.getStore()).newPage();
+      controller.setActivePage(pg, sessionStore.getStore());
       if (url) await pg.goto(url);
       return { url: pg.url() };
     },
 
     // --- Script execution ---
     'exec.script': async ({ code }) => {
+      if (typeof code !== 'string') throw new Error('exec.script: code must be a string');
       const page = await p();
-      const result = await page.evaluate(new Function(`return (async () => { ${code} })()`) as any);
+      const result = await page.evaluate((c: string) => {
+        // eslint-disable-next-line no-new-func
+        return new Function(`return (async () => { ${c} })()`)();
+      }, code);
       return { result };
     },
 
@@ -347,7 +447,12 @@ export function buildHandlers(broadcast: Broadcaster): Record<string, Handler> {
         await humanScroll(page, randInt(80, 250));
         await humanPause(600, 1600);
       }
-      return { ok: true };
+      return { 
+        ok: true, 
+        text: await page.evaluate(() => document.body.innerText),
+        url: page.url(),
+        title: await page.title()
+      };
     },
     'human.explore': async ({ steps = 3 }: any = {}) => {
       const page = await p();
@@ -364,9 +469,33 @@ export function buildHandlers(broadcast: Broadcaster): Record<string, Handler> {
     // Returns an annotated screenshot with numbered interactive elements + their metadata.
     // The agent should call this first to "see" the page, then use agent.click {ref: N}.
     'page.annotate': async () => {
-      const page = await p();
-      const { elements, imageB64 } = await annotateInteractive(page);
-      return { image: imageB64, elements, url: page.url(), title: await page.title() };
+      let page = await p();
+      let retries = 3;
+      while (retries > 0) {
+        try {
+          await page.waitForLoadState('domcontentloaded').catch(() => {});
+          const { elements, imageB64 } = await annotateInteractive(page);
+          const dir = join(process.cwd(), 'logs', 'screenshots');
+          await mkdir(dir, { recursive: true });
+          const ts = new Date().toISOString().replace(/[:.]/g, '-');
+          const sessionId = sessionStore.getStore() ?? 'default';
+          const filename = `annotate-${ts}-session-${sessionId}.jpg`;
+          const path = join(dir, filename);
+          await writeFile(path, Buffer.from(imageB64, 'base64'));
+          const port = process.env.PORT ?? 8080;
+          const imageUrl = `http://localhost:${port}/captures/${filename}`;
+          return { image: imageB64, imageUrl, elements, url: page.url(), title: await page.title() };
+        } catch (e: any) {
+          if (e.message.includes('Execution context was destroyed') || e.message.includes('Target closed') || e.message.includes('Navigating')) {
+            retries--;
+            await sleep(500);
+            page = await p();
+            continue;
+          }
+          throw e;
+        }
+      }
+      throw new Error('Failed to annotate after multiple retries due to navigation');
     },
 
     // Compact accessibility tree (role + name, no bounding boxes).
@@ -452,11 +581,14 @@ export function buildHandlers(broadcast: Broadcaster): Record<string, Handler> {
     },
 
     // Scroll the viewport. direction: 'down'|'up'|'left'|'right', amount in px.
-    'agent.scroll': async ({ direction = 'down', amount = 600 }: any) => {
+    // Optionally pass {x, y} to scroll at specific page coordinates.
+    'agent.scroll': async ({ direction = 'down', amount = 600, x, y }: any) => {
       const page = await p();
-      const dy = direction === 'up' ? -Math.abs(amount) : direction === 'down' ? Math.abs(amount) : 0;
-      const dx = direction === 'left' ? -Math.abs(amount) : direction === 'right' ? Math.abs(amount) : 0;
-      await humanScroll(page, dy || dx);
+      const a = Math.abs(amount);
+      const dy = direction === 'up' ? -a : direction === 'down' ? a : 0;
+      const dx = direction === 'left' ? -a : direction === 'right' ? a : 0;
+      if (typeof x === 'number' && typeof y === 'number') await humanMove(page, x, y);
+      await humanScroll(page, dy, dx);
       return { ok: true };
     },
 
@@ -559,7 +691,7 @@ export function buildHandlers(broadcast: Broadcaster): Record<string, Handler> {
 
     // --- Lifecycle ---
     'browser.close': async () => {
-      await controller.close();
+      await controller.close(sessionStore.getStore());
       return { ok: true };
     },
     ping: async () => ({ pong: Date.now() }),

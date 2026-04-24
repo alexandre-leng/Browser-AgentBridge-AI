@@ -1,4 +1,5 @@
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { STEALTH_SCRIPT } from './stealth.js';
 
 export interface LaunchOpts {
@@ -9,13 +10,20 @@ export interface LaunchOpts {
   maximized?: boolean;
 }
 
+export const sessionStore = new AsyncLocalStorage<string | undefined>();
+
 export class BrowserController {
   private browser: Browser | null = null;
-  private context: BrowserContext | null = null;
-  private currentPage: Page | null = null;
+  private defaultContext: BrowserContext | null = null;
+  private defaultPage: Page | null = null;
+  
+  private contexts = new Map<string, BrowserContext>();
+  private pages = new Map<string, Page>();
 
-  async launch(opts: LaunchOpts = {}) {
-    if (this.context) return;
+  async launch(opts: LaunchOpts = {}, sessionId?: string) {
+    const isDefault = !sessionId;
+    if (isDefault && this.defaultContext) return;
+    if (sessionId && this.contexts.has(sessionId)) return;
 
     const cdpUrl = opts.cdpUrl ?? process.env.CHROME_CDP_URL;
     const profileDir = opts.profileDir ?? process.env.CHROME_PROFILE;
@@ -38,68 +46,105 @@ export class BrowserController {
       acceptDownloads: true,
     };
 
+    let ctx: BrowserContext;
+    if (!this.browser && !cdpUrl && !profileDir) {
+      this.browser = await chromium.launch({
+        headless: opts.headless ?? false,
+        channel,
+        args,
+      });
+    }
+
     if (cdpUrl) {
-      this.browser = await chromium.connectOverCDP(cdpUrl);
-      this.context = this.browser.contexts()[0] ?? (await this.browser.newContext(contextOpts));
-    } else if (profileDir) {
-      this.context = await chromium.launchPersistentContext(profileDir, {
+      this.browser = this.browser || await chromium.connectOverCDP(cdpUrl);
+      ctx = this.browser.contexts()[0] ?? (await this.browser.newContext(contextOpts));
+    } else if (profileDir && isDefault) {
+      ctx = await chromium.launchPersistentContext(profileDir, {
         headless: false,
         channel,
         args,
         ...contextOpts,
       });
     } else {
-      this.browser = await chromium.launch({
-        headless: opts.headless ?? false,
-        channel,
-        args,
-      });
-      this.context = await this.browser.newContext(contextOpts);
+      ctx = await this.browser!.newContext(contextOpts);
     }
 
-    // Inject stealth patches before any page script
-    await this.context.addInitScript(STEALTH_SCRIPT);
+    await ctx.addInitScript(STEALTH_SCRIPT);
+    const existing = ctx.pages()[0];
+    const page = existing ?? (await ctx.newPage());
+    
+    try { await page.bringToFront(); } catch {}
 
-    const existing = this.context.pages()[0];
-    this.currentPage = existing ?? (await this.context.newPage());
-    try {
-      await this.currentPage.bringToFront();
-    } catch {
-      /* ignore */
+    if (isDefault) {
+      this.defaultContext = ctx;
+      this.defaultPage = page;
+    } else {
+      this.contexts.set(sessionId, ctx);
+      this.pages.set(sessionId, page);
     }
   }
 
-  async page(): Promise<Page> {
-    if (!this.currentPage) await this.launch();
-    const p = this.currentPage;
-    if (!p) throw new Error('page not available');
-    if (p.isClosed()) {
-      const pages = this.context?.pages().filter((x) => !x.isClosed()) ?? [];
-      this.currentPage = pages[0] ?? (await this.context!.newPage());
+  async page(sessionId?: string): Promise<Page> {
+    if (!sessionId) {
+      if (!this.defaultPage) await this.launch();
+      let p = this.defaultPage;
+      if (!p) throw new Error('page not available');
+      if (p.isClosed()) {
+        const pages = this.defaultContext?.pages().filter((x) => !x.isClosed()) ?? [];
+        this.defaultPage = pages[0] ?? (await this.defaultContext!.newPage());
+        p = this.defaultPage;
+      }
+      try { await p.bringToFront(); } catch {}
+      return p;
+    } else {
+      if (!this.contexts.has(sessionId)) await this.launch({}, sessionId);
+      let p = this.pages.get(sessionId);
+      if (!p || p.isClosed()) {
+        const ctx = this.contexts.get(sessionId);
+        const pages = ctx?.pages().filter((x) => !x.isClosed()) ?? [];
+        p = pages[0] ?? (await ctx!.newPage());
+        this.pages.set(sessionId, p);
+      }
+      try { await p.bringToFront(); } catch {}
+      return p;
     }
-    try {
-      await this.currentPage!.bringToFront();
-    } catch {
-      /* ignore */
+  }
+
+  ctx(sessionId?: string): BrowserContext {
+    if (!sessionId) {
+      if (!this.defaultContext) throw new Error('context not launched');
+      return this.defaultContext;
+    } else {
+      const c = this.contexts.get(sessionId);
+      if (!c) throw new Error(`context not launched for session ${sessionId}`);
+      return c;
     }
-    return this.currentPage!;
   }
 
-  ctx(): BrowserContext {
-    if (!this.context) throw new Error('context not launched');
-    return this.context;
+  setActivePage(p: Page, sessionId?: string) {
+    if (!sessionId) this.defaultPage = p;
+    else this.pages.set(sessionId, p);
   }
 
-  setActivePage(p: Page) {
-    this.currentPage = p;
+  async close(sessionId?: string) {
+    if (!sessionId) {
+      await this.defaultContext?.close().catch(() => {});
+      await this.browser?.close().catch(() => {});
+      this.browser = null;
+      this.defaultContext = null;
+      this.defaultPage = null;
+      for (const ctx of this.contexts.values()) await ctx.close().catch(() => {});
+      this.contexts.clear();
+      this.pages.clear();
+    } else {
+      await this.contexts.get(sessionId)?.close().catch(() => {});
+      this.contexts.delete(sessionId);
+      this.pages.delete(sessionId);
+    }
   }
-
-  async close() {
-    await this.context?.close().catch(() => {});
-    await this.browser?.close().catch(() => {});
-    this.browser = null;
-    this.context = null;
-    this.currentPage = null;
+  
+  listSessions() {
+    return Array.from(this.contexts.keys());
   }
 }
 

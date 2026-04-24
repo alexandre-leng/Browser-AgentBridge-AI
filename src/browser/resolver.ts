@@ -2,8 +2,11 @@ import type { Page, Locator, FrameLocator } from 'playwright';
 
 export type Query = string;
 
-export function detectKind(q: string): 'xpath' | 'css' | 'text' {
-  const s = q.trim();
+export function detectKind(q: any): 'xpath' | 'css' | 'text' {
+  if (q === undefined || q === null || q === '') {
+    throw new Error('Query is required for element resolution');
+  }
+  const s = String(q).trim();
   if (s.startsWith('//') || s.startsWith('(/') || s.startsWith('/html')) return 'xpath';
   if (/^xpath=/.test(s)) return 'xpath';
   if (/[#.\[\]>]|::/.test(s) || /^[a-z]+\[/i.test(s)) return 'css';
