@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<title>OpenClaw Viewer</title>
+<style>
+  :root { --bg:#111; --fg:#eee; --panel:#1a1a1a; --border:#2a2a2a; --accent:#4ade80; --warn:#f59e0b; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 13px system-ui, sans-serif; }
+  header { padding: 8px 12px; display: flex; gap: 10px; align-items: center; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  button { background: var(--panel); color: var(--fg); border: 1px solid var(--border); padding: 5px 10px; cursor: pointer; border-radius: 4px; }
+  button:hover { border-color: #444; }
+  button.active { background: var(--accent); color: #000; border-color: var(--accent); }
+  input[type=number], input[type=text] { background: var(--panel); color: var(--fg); border: 1px solid var(--border); padding: 5px 8px; border-radius: 4px; }
+  #url { flex: 1; min-width: 200px; }
+  #meta { opacity: 0.75; margin-left: auto; font-variant-numeric: tabular-nums; }
+  #stage { position: relative; display: flex; justify-content: center; padding: 12px; user-select: none; }
+  #wrap { position: relative; display: inline-block; }
+  #frame { max-width: 100%; display: block; border: 1px solid var(--border); }
+  #wrap.takeover #frame { cursor: none; border-color: var(--accent); }
+  #ghost { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border: 2px solid var(--accent); border-radius: 50%; pointer-events: none; display: none; box-shadow: 0 0 8px var(--accent); }
+  #wrap.takeover #ghost { display: block; }
+  kbd { background: #222; border: 1px solid #333; border-bottom-width: 2px; border-radius: 3px; padding: 1px 5px; font: 11px monospace; }
+  #help { opacity: 0.6; font-size: 11px; }
+</style>
+</head>
+<body>
+<header>
+  <button id="start">▶ Start</button>
+  <button id="stop">■ Stop</button>
+  <input id="fps" type="number" value="2" min="1" max="15" style="width:56px" title="FPS" />
+  <button id="takeover" title="Capture souris + clavier">🖱 Prendre le contrôle</button>
+  <input id="url" type="text" placeholder="https://…" />
+  <button id="go">Aller</button>
+  <span id="help">Takeover: <kbd>Esc</kbd> pour sortir</span>
+  <span id="meta">disconnected</span>
+</header>
+<div id="stage">
+  <div id="wrap" tabindex="0">
+    <img id="frame" alt="stream" draggable="false" />
+    <div id="ghost"></div>
+  </div>
+</div>
+<script>
+const wsUrl = (location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host + '/ws/browser-bridge';
+const ws = new WebSocket(wsUrl);
+const $frame = document.getElementById('frame');
+const $ghost = document.getElementById('ghost');
+const $wrap = document.getElementById('wrap');
+const $meta = document.getElementById('meta');
+const $takeover = document.getElementById('takeover');
+const $url = document.getElementById('url');
+
+let pageW = 1280, pageH = 800;   // CSS pixels of remote page
+let currentUrl = '';
+let takeover = false;
+let connected = false;
+let lastRtt = null;
+const pending = new Map(); // id -> {t0, resolve}
+
+const uid = () => Math.random().toString(36).slice(2);
+const send = (type, payload = {}) => {
+  if (ws.readyState !== 1) return null;
+  const id = uid();
+  ws.send(JSON.stringify({ id, type, payload }));
+  return id;
+};
+const rpc = (type, payload) => new Promise((resolve) => {
+  const id = send(type, payload);
+  if (!id) return resolve(null);
+  pending.set(id, { t0: performance.now(), resolve });
+  setTimeout(() => { if (pending.has(id)) { pending.delete(id); resolve(null); } }, 5000);
+});
+
+ws.onopen = () => { connected = true; updateMeta(); };
+ws.onclose = () => { connected = false; updateMeta(); };
+ws.onmessage = (ev) => {
+  let msg; try { msg = JSON.parse(ev.data); } catch { return; }
+  if (msg.type === 'vision.frame') {
+    $frame.src = 'data:image/jpeg;base64,' + msg.payload.image;
+    pageW = msg.payload.cssW ?? msg.payload.w ?? pageW;
+    pageH = msg.payload.cssH ?? msg.payload.h ?? pageH;
+    currentUrl = msg.payload.url || '';
+    if (document.activeElement !== $url) $url.value = currentUrl;
+    updateMeta();
+  } else if (msg.id && pending.has(msg.id)) {
+    const { t0, resolve } = pending.get(msg.id);
+    pending.delete(msg.id);
+    lastRtt = Math.round(performance.now() - t0);
+    resolve(msg);
+  }
+};
+
+function updateMeta() {
+  const parts = [];
+  parts.push(connected ? 'connected' : 'disconnected');
+  if (currentUrl) parts.push(currentUrl);
+  parts.push(pageW + '×' + pageH);
+  if (lastRtt != null) parts.push(lastRtt + 'ms');
+  if (takeover) parts.push('TAKEOVER');
+  $meta.textContent = parts.join(' — ');
+}
+
+// --- Coord mapping: viewer pixel -> remote page CSS pixel ---
+function toPage(ev) {
+  const rect = $frame.getBoundingClientRect();
+  const x = ((ev.clientX - rect.left) / rect.width) * pageW;
+  const y = ((ev.clientY - rect.top) / rect.height) * pageH;
+  return {
+    x: Math.max(0, Math.min(pageW - 1, Math.round(x))),
+    y: Math.max(0, Math.min(pageH - 1, Math.round(y))),
+    inside: ev.clientX >= rect.left && ev.clientX <= rect.right && ev.clientY >= rect.top && ev.clientY <= rect.bottom,
+  };
+}
+function moveGhost(ev) {
+  const rect = $wrap.getBoundingClientRect();
+  $ghost.style.left = (ev.clientX - rect.left) + 'px';
+  $ghost.style.top = (ev.clientY - rect.top) + 'px';
+}
+
+// --- Toolbar ---
+document.getElementById('start').onclick = () => send('vision.start', { fps: Number(document.getElementById('fps').value) });
+document.getElementById('stop').onclick = () => send('vision.stop', {});
+document.getElementById('go').onclick = () => { if ($url.value) send('navigate', { url: $url.value }); };
+$url.addEventListener('keydown', (e) => { if (e.key === 'Enter' && $url.value) send('navigate', { url: $url.value }); });
+
+$takeover.onclick = () => setTakeover(!takeover);
+function setTakeover(on) {
+  takeover = on;
+  $wrap.classList.toggle('takeover', on);
+  $takeover.classList.toggle('active', on);
+  $takeover.textContent = on ? '✋ Relâcher' : '🖱 Prendre le contrôle';
+  if (on) $wrap.focus();
+  updateMeta();
+}
+
+// --- Mouse passthrough ---
+let lastMoveSent = 0;
+$wrap.addEventListener('mousemove', (ev) => {
+  if (!takeover) return;
+  moveGhost(ev);
+  const now = performance.now();
+  if (now - lastMoveSent < 50) return;   // ~20 Hz throttle
+  lastMoveSent = now;
+  const { x, y, inside } = toPage(ev);
+  if (inside) send('input.mouseMove', { x, y });
+});
+$wrap.addEventListener('mousedown', (ev) => {
+  if (!takeover) { return; }
+  ev.preventDefault();
+  const { x, y } = toPage(ev);
+  const button = ev.button === 2 ? 'right' : ev.button === 1 ? 'middle' : 'left';
+  send('input.mouseDown', { x, y, button });
+});
+$wrap.addEventListener('mouseup', (ev) => {
+  if (!takeover) {
+    // legacy single-click behaviour
+    const { x, y } = toPage(ev);
+    send('mouse.click', { x, y });
+    return;
+  }
+  ev.preventDefault();
+  const { x, y } = toPage(ev);
+  const button = ev.button === 2 ? 'right' : ev.button === 1 ? 'middle' : 'left';
+  send('input.mouseUp', { x, y, button });
+});
+$wrap.addEventListener('contextmenu', (ev) => { if (takeover) ev.preventDefault(); });
+$wrap.addEventListener('dragstart', (ev) => ev.preventDefault());
+
+// --- Wheel ---
+$wrap.addEventListener('wheel', (ev) => {
+  if (!takeover) return;
+  ev.preventDefault();
+  const { x, y } = toPage(ev);
+  send('input.wheel', { x, y, deltaX: ev.deltaX, deltaY: ev.deltaY });
+}, { passive: false });
+
+// --- Keyboard: capture on window while takeover, ignore when typing in url bar ---
+let textBuf = '';
+let textTimer = null;
+function flushText() {
+  if (textBuf) { send('input.text', { text: textBuf }); textBuf = ''; }
+  textTimer = null;
+}
+const MODIFIERS = new Set(['Shift','Control','Alt','Meta','CapsLock','NumLock','ScrollLock']);
+const BLOCKED_COMBOS = new Set(['KeyT','KeyW','KeyN','KeyR']); // Ctrl+T/W/N/R — don't fire locally
+
+window.addEventListener('keydown', (ev) => {
+  if (!takeover) return;
+  if (document.activeElement === $url) return;
+  if (ev.key === 'Escape') { setTakeover(false); ev.preventDefault(); return; }
+
+  // Avoid blowing up the local browser with Ctrl+T etc.
+  if ((ev.ctrlKey || ev.metaKey) && BLOCKED_COMBOS.has(ev.code)) ev.preventDefault();
+
+  // Printable + no modifier (except Shift): batch via insertText
+  const printable = ev.key.length === 1 && !ev.ctrlKey && !ev.metaKey && !ev.altKey;
+  if (printable) {
+    ev.preventDefault();
+    textBuf += ev.key;
+    if (textTimer) clearTimeout(textTimer);
+    textTimer = setTimeout(flushText, 40);
+    return;
+  }
+
+  if (textBuf) flushText();
+  if (!MODIFIERS.has(ev.key)) ev.preventDefault();
+  send('input.keyDown', { key: ev.key });
+}, true);
+
+window.addEventListener('keyup', (ev) => {
+  if (!takeover) return;
+  if (document.activeElement === $url) return;
+  const printable = ev.key.length === 1 && !ev.ctrlKey && !ev.metaKey && !ev.altKey;
+  if (printable) return; // already sent via insertText
+  send('input.keyUp', { key: ev.key });
+}, true);
+
+// --- Resize → viewport.set ---
+let resizeTimer = null;
+const ro = new ResizeObserver(() => {
+  if (resizeTimer) clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    const rect = $frame.getBoundingClientRect();
+    // Only suggest viewport change if frame has grown meaningfully beyond current pageW/H.
+    // We pick a target matching the displayed size to avoid letterboxing.
+    const targetW = Math.round(rect.width);
+    const targetH = Math.round(rect.height);
+    if (targetW > 320 && Math.abs(targetW - pageW) > 80) {
+      send('viewport.set', { width: targetW, height: targetH });
+    }
+  }, 400);
+});
+ro.observe($frame);
+
+// --- Latency ping ---
+setInterval(() => { if (connected) rpc('ping', {}).then(() => updateMeta()); }, 2000);
+</script>
+</body>
+</html>
