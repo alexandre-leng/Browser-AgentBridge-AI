@@ -5,9 +5,10 @@ const port = Number(process.env.PORT ?? 8080);
 
 await controller.launch({ headless: false });
 startServer(port);
+import { log } from './logger.js';
 
 const shutdown = async () => {
-  console.log('[bridge] shutting down');
+  log('info', 'shutting down');
   await controller.close();
   process.exit(0);
 };

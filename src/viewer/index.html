@@ -20,6 +20,7 @@
   #wrap.takeover #frame { cursor: none; border-color: var(--accent); }
   #ghost { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border: 2px solid var(--accent); border-radius: 50%; pointer-events: none; display: none; box-shadow: 0 0 8px var(--accent); }
   #wrap.takeover #ghost { display: block; }
+  #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
   kbd { background: #222; border: 1px solid #333; border-bottom-width: 2px; border-radius: 3px; padding: 1px 5px; font: 11px monospace; }
   #help { opacity: 0.6; font-size: 11px; }
 </style>
@@ -28,8 +29,9 @@
 <header>
   <button id="start">▶ Start</button>
   <button id="stop">■ Stop</button>
-  <input id="fps" type="number" value="2" min="1" max="15" style="width:56px" title="FPS" />
   <button id="takeover" title="Capture souris + clavier">🖱 Prendre le contrôle</button>
+  <button id="toggleAnn">🏷 Annotations</button>
+  <input id="fps" type="number" value="2" min="1" max="15" style="width:56px" title="FPS" />
   <input id="url" type="text" placeholder="https://…" />
   <button id="go">Aller</button>
   <span id="help">Takeover: <kbd>Esc</kbd> pour sortir</span>
@@ -38,6 +40,7 @@
 <div id="stage">
   <div id="wrap" tabindex="0">
     <img id="frame" alt="stream" draggable="false" />
+    <canvas id="overlay"></canvas>
     <div id="ghost"></div>
   </div>
 </div>
@@ -45,15 +48,19 @@
 const wsUrl = (location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host + '/ws/browser-bridge';
 const ws = new WebSocket(wsUrl);
 const $frame = document.getElementById('frame');
+const $overlay = document.getElementById('overlay');
+const ctx = $overlay.getContext('2d');
 const $ghost = document.getElementById('ghost');
 const $wrap = document.getElementById('wrap');
 const $meta = document.getElementById('meta');
 const $takeover = document.getElementById('takeover');
+const $toggleAnn = document.getElementById('toggleAnn');
 const $url = document.getElementById('url');
 
 let pageW = 1280, pageH = 800;   // CSS pixels of remote page
 let currentUrl = '';
 let takeover = false;
+let annotate = false;
 let connected = false;
 let lastRtt = null;
 const pending = new Map(); // id -> {t0, resolve}
@@ -82,6 +89,13 @@ ws.onmessage = (ev) => {
     pageH = msg.payload.cssH ?? msg.payload.h ?? pageH;
     currentUrl = msg.payload.url || '';
     if (document.activeElement !== $url) $url.value = currentUrl;
+    
+    if (msg.payload.elements) {
+      drawElements(msg.payload.elements);
+    } else {
+      ctx.clearRect(0, 0, $overlay.width, $overlay.height);
+    }
+    
     updateMeta();
   } else if (msg.id && pending.has(msg.id)) {
     const { t0, resolve } = pending.get(msg.id);
@@ -124,6 +138,9 @@ document.getElementById('stop').onclick = () => send('vision.stop', {});
 document.getElementById('go').onclick = () => { if ($url.value) send('navigate', { url: $url.value }); };
 $url.addEventListener('keydown', (e) => { if (e.key === 'Enter' && $url.value) send('navigate', { url: $url.value }); });
 
+  updateMeta();
+}
+
 $takeover.onclick = () => setTakeover(!takeover);
 function setTakeover(on) {
   takeover = on;
@@ -132,6 +149,40 @@ function setTakeover(on) {
   $takeover.textContent = on ? '✋ Relâcher' : '🖱 Prendre le contrôle';
   if (on) $wrap.focus();
   updateMeta();
+}
+
+$toggleAnn.onclick = () => {
+  annotate = !annotate;
+  $toggleAnn.classList.toggle('active', annotate);
+  send('vision.start', { fps: Number(document.getElementById('fps').value), annotate });
+};
+
+function drawElements(els) {
+  $overlay.width = $frame.width;
+  $overlay.height = $frame.height;
+  ctx.clearRect(0, 0, $overlay.width, $overlay.height);
+  
+  const scaleX = $frame.width / pageW;
+  const scaleY = $frame.height / pageH;
+  
+  els.forEach(el => {
+    const { x, y, w, h } = el.box;
+    ctx.strokeStyle = 'rgba(74, 222, 128, 0.9)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x * scaleX, y * scaleY, w * scaleX, h * scaleY);
+    
+    ctx.fillStyle = 'rgba(74, 222, 128, 0.1)';
+    ctx.fillRect(x * scaleX, y * scaleY, w * scaleX, h * scaleY);
+    
+    ctx.fillStyle = '#4ade80';
+    ctx.font = 'bold 10px system-ui';
+    const txt = String(el.id);
+    const tw = ctx.measureText(txt).width;
+    ctx.fillRect(x * scaleX - 1, y * scaleY - 15, tw + 6, 15);
+    
+    ctx.fillStyle = '#000';
+    ctx.fillText(txt, x * scaleX + 2, y * scaleY - 4);
+  });
 }
 
 // --- Mouse passthrough ---

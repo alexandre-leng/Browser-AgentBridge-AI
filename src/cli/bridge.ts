@@ -67,7 +67,8 @@ switch (cmd) {
     break;
   case 'extract':
     type = 'dom.extract';
-    payload = {};
+    if (rest[0] === '--type') payload = { type: rest[1] };
+    else payload = {};
     break;
   case 'status':
     type = 'browser.status';
@@ -75,8 +76,24 @@ switch (cmd) {
     break;
   case 'run':
     type = 'script.execute';
+    const parseArgs = (str: string): string[] => {
+      const parsed = [];
+      let current = '';
+      let inQuotes = false;
+      for (const char of str) {
+        if (char === '"') { inQuotes = !inQuotes; continue; }
+        if (char === ' ' && !inQuotes) {
+          if (current) parsed.push(current);
+          current = '';
+        } else {
+          current += char;
+        }
+      }
+      if (current) parsed.push(current);
+      return parsed;
+    };
     const commands = rest.map(rawCmd => {
-      const parts = rawCmd.split(' ');
+      const parts = parseArgs(rawCmd);
       const c = parts[0];
       const pParts = parts.slice(1);
       switch(c) {
@@ -85,7 +102,15 @@ switch (cmd) {
         case 'click': return { type: 'agent.click', payload: { ref: Number(pParts[0]) || pParts[0] } };
         case 'type': return { type: 'agent.type', payload: { ref: Number(pParts[0]) || pParts[0], text: pParts.slice(1).join(' ') } };
         case 'press': return { type: 'agent.press', payload: { key: pParts[0] } };
-        case 'wait': return { type: 'wait', payload: { ms: Number(pParts[0]) } };
+        case 'wait': 
+          if (pParts[0] === '--for') {
+            if (pParts[1] === 'text') return { type: 'agent.waitFor', payload: { text: pParts.slice(2).join(' ') } };
+            if (pParts[1] === 'url') return { type: 'agent.waitFor', payload: { url: pParts.slice(2).join(' ') } };
+          }
+          if (pParts.length === 0) return { type: 'agent.waitFor', payload: {} };
+          return { type: 'wait', payload: { ms: Number(pParts[0]) } };
+        case 'extract':
+          return { type: 'dom.extract', payload: pParts[0] === '--type' ? { type: pParts[1] } : {} };
         default: return { type: c, payload: {} };
       }
     });

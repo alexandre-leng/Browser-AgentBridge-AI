@@ -1,6 +1,7 @@
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { STEALTH_SCRIPT } from './stealth.js';
+import { log } from '../logger.js';
 
 export interface LaunchOpts {
   headless?: boolean;
@@ -19,6 +20,16 @@ export class BrowserController {
   
   private contexts = new Map<string, BrowserContext>();
   private pages = new Map<string, Page>();
+  private eventListeners = new Set<(event: any) => void>();
+
+  onEvent(cb: (event: any) => void) {
+    this.eventListeners.add(cb);
+    return () => this.eventListeners.delete(cb);
+  }
+
+  private emit(type: string, payload: any) {
+    for (const cb of this.eventListeners) cb({ type, payload });
+  }
 
   async launch(opts: LaunchOpts = {}, sessionId?: string) {
     const isDefault = !sessionId;
@@ -58,9 +69,9 @@ export class BrowserController {
     if (cdpUrl) {
       this.browser = this.browser || await chromium.connectOverCDP(cdpUrl);
       ctx = this.browser.contexts()[0] ?? (await this.browser.newContext(contextOpts));
-    } else if (profileDir && isDefault) {
+    } else if (profileDir) {
       ctx = await chromium.launchPersistentContext(profileDir, {
-        headless: false,
+        headless: opts.headless ?? false,
         channel,
         args,
         ...contextOpts,
@@ -70,8 +81,41 @@ export class BrowserController {
     }
 
     await ctx.addInitScript(STEALTH_SCRIPT);
+    
+    ctx.on('page', (p) => {
+      p.on('dialog', async (dialog) => {
+        log('info', 'dialog handled', { type: dialog.type(), message: dialog.message() });
+        await dialog.accept().catch(() => {});
+      });
+      p.on('download', async (download) => {
+        const path = await download.path().catch(() => null);
+        this.emit('browser.download', { 
+          sessionId: sessionId || 'default', 
+          filename: download.suggestedFilename(), 
+          path, 
+          url: download.url() 
+        });
+      });
+    });
+
     const existing = ctx.pages()[0];
     const page = existing ?? (await ctx.newPage());
+    
+    if (existing) {
+      page.on('dialog', async (dialog) => {
+        log('info', 'dialog handled', { type: dialog.type(), message: dialog.message() });
+        await dialog.accept().catch(() => {});
+      });
+      page.on('download', async (download) => {
+        const path = await download.path().catch(() => null);
+        this.emit('browser.download', { 
+          sessionId: sessionId || 'default', 
+          filename: download.suggestedFilename(), 
+          path, 
+          url: download.url() 
+        });
+      });
+    }
     
     try { await page.bringToFront(); } catch {}
 

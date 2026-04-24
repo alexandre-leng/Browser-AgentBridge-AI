@@ -1,4 +1,4 @@
-import type { Page } from 'playwright';
+import type { Page, Frame } from 'playwright';
 
 export interface AgentElement {
   id: number;
@@ -9,23 +9,62 @@ export interface AgentElement {
 }
 
 // Per-session cache of last annotated elements so agent.click {ref:3} works after page.annotate
-let _cache: AgentElement[] = [];
+const _cache = new Map<string, AgentElement[]>();
 
-export function getAgentElements() {
-  return _cache;
+export function getAgentElements(sessionId: string = 'default') {
+  return _cache.get(sessionId) ?? [];
 }
 
-export function findByRef(ref: string | number): AgentElement | null {
+function levenshtein(a: string, b: string): number {
+  const matrix = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+  for (let i = 0; i <= a.length; i++) matrix[i][0] = i;
+  for (let j = 0; j <= b.length; j++) matrix[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      matrix[i][j] = Math.min(
+        matrix[i - 1][j] + 1,
+        matrix[i][j - 1] + 1,
+        matrix[i - 1][j - 1] + cost
+      );
+    }
+  }
+  return matrix[a.length][b.length];
+}
+
+function scoreMatch(el: AgentElement, query: string): number {
+  const q = query.toLowerCase();
+  const name = el.name.toLowerCase();
+  const role = el.role.toLowerCase();
+  
+  if (name === q) return 100;
+  if (name.includes(q)) return 80;
+  if (role === q) return 60;
+  
+  const dist = levenshtein(name, q);
+  if (dist <= 3) return 70 - dist * 10;
+  return 0;
+}
+
+export function findByRef(ref: string | number, sessionId: string = 'default'): AgentElement | null {
+  const cache = getAgentElements(sessionId);
   if (typeof ref === 'number') {
-    return _cache.find((e) => e.id === ref) ?? null;
+    return cache.find((e) => e.id === ref) ?? null;
   }
   const q = ref.toLowerCase().trim();
-  return (
-    _cache.find((e) => e.name.toLowerCase() === q) ??
-    _cache.find((e) => e.name.toLowerCase().includes(q)) ??
-    _cache.find((e) => e.role.toLowerCase() === q) ??
-    null
-  );
+  
+  let bestMatch: AgentElement | null = null;
+  let highestScore = 0;
+  
+  for (const el of cache) {
+    const score = scoreMatch(el, q);
+    if (score > highestScore) {
+      highestScore = score;
+      bestMatch = el;
+    }
+  }
+  
+  return highestScore > 0 ? bestMatch : null;
 }
 
 const INTERACTIVE_SEL = [
@@ -49,22 +88,23 @@ const INTERACTIVE_SEL = [
 ].join(', ');
 
 /** Collect all in-viewport interactive elements with bounding boxes + accessible names. */
-async function collectElements(page: Page): Promise<AgentElement[]> {
-  return page.evaluate((sel: string) => {
+async function collectElementsRecursive(frame: Frame, offset = { x: 0, y: 0 }, context = { id: 1 }): Promise<AgentElement[]> {
+  const elements = await frame.evaluate(({ sel, offset }) => {
     const vw = window.innerWidth;
     const vh = window.innerHeight;
     const seen = new Set<string>();
     const result: any[] = [];
-    let id = 1;
+    
     for (const el of Array.from(document.querySelectorAll(sel))) {
       const r = el.getBoundingClientRect();
-      // Skip invisible or off-screen
+      // Skip invisible or off-screen (relative to current frame)
       if (r.width < 4 || r.height < 4) continue;
-      if (r.right < 0 || r.bottom < 0 || r.left > vw || r.top > vh) continue;
+      
       // Dedup by position
       const key = `${Math.round(r.x)},${Math.round(r.y)},${Math.round(r.width)},${Math.round(r.height)}`;
       if (seen.has(key)) continue;
       seen.add(key);
+      
       const h = el as HTMLElement;
       const labelledById = h.getAttribute('aria-labelledby');
       const labelText = labelledById ? (document.getElementById(labelledById)?.innerText?.trim() ?? '') : '';
@@ -79,22 +119,53 @@ async function collectElements(page: Page): Promise<AgentElement[]> {
         '';
       const tag = el.tagName.toLowerCase();
       const role = h.getAttribute('role') || tag;
+      
       result.push({
-        id: id++,
         role,
         name: name.trim(),
         tag,
-        box: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) },
+        box: { 
+          x: Math.round(r.x + offset.x), 
+          y: Math.round(r.y + offset.y), 
+          w: Math.round(r.width), 
+          h: Math.round(r.height) 
+        },
       });
     }
     return result;
-  }, INTERACTIVE_SEL);
+  }, { sel: INTERACTIVE_SEL, offset });
+
+  for (const el of elements) {
+    el.id = context.id++;
+  }
+
+  let allElements = [...elements];
+  
+  for (const child of frame.childFrames()) {
+    try {
+      const handle = await child.frameElement();
+      const box = await handle.boundingBox();
+      if (box) {
+        // Only recurse if the iframe itself is somewhat visible
+        const childElements = await collectElementsRecursive(child, { x: offset.x + box.x, y: offset.y + box.y }, context);
+        allElements = allElements.concat(childElements);
+      }
+    } catch (e) {
+      // Ignore frame access errors
+    }
+  }
+
+  return allElements;
+}
+
+export async function collectElements(page: Page): Promise<AgentElement[]> {
+  return collectElementsRecursive(page.mainFrame());
 }
 
 const OVERLAY_ATTR = '__oc_agent_overlay__';
 
 /** Inject numbered bounding-box overlay, take screenshot, remove overlay. */
-export async function annotateInteractive(page: Page): Promise<{ elements: AgentElement[]; imageB64: string }> {
+export async function annotateInteractive(page: Page, sessionId: string = 'default'): Promise<{ elements: AgentElement[]; imageB64: string }> {
   const elements = await collectElements(page);
 
   // Draw overlay
@@ -127,7 +198,7 @@ export async function annotateInteractive(page: Page): Promise<{ elements: Agent
     document.querySelectorAll(`[${attr}]`).forEach((e) => e.remove());
   }, OVERLAY_ATTR);
 
-  _cache = elements;
+  _cache.set(sessionId, elements);
   return { elements, imageB64: buf.toString('base64') };
 }
 

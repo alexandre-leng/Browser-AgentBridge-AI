@@ -28,10 +28,20 @@ async function centerOf(page: Page, query: string) {
 }
 
 export function buildHandlers(broadcast: Broadcaster, dispatch?: (type: string, payload: any) => Promise<any>): Record<string, Handler> {
+  const getEl = async (ref: any, retry = true) => {
+    const sessionId = sessionStore.getStore();
+    let el = findByRef(ref, sessionId);
+    if (!el && retry) {
+      await annotateInteractive(await p(), sessionId);
+      el = findByRef(ref, sessionId);
+    }
+    return el;
+  };
+
   return {
     // --- Sessions ---
-    'session.create': async ({ sessionId, headless }: any) => {
-      await controller.launch({ headless }, sessionId);
+    'session.create': async ({ sessionId, headless, profileDir }: any) => {
+      await controller.launch({ headless, profileDir }, sessionId);
       return { sessionId, ok: true };
     },
     'session.list': async () => {
@@ -101,28 +111,17 @@ export function buildHandlers(broadcast: Broadcaster, dispatch?: (type: string, 
       };
     },
 
-    // --- Agent ---
-    'agent.task': async ({ goal, url, maxSteps = 10, onAmbiguity = 'ask' }: any) => {
-      if (!dispatch) throw new Error('dispatch not available');
-      const steps = [];
-      if (url) {
-        await dispatch('navigate', { url });
-        steps.push({ action: 'navigate', url });
-      }
-      // Simple MVP: we just annotate and return to simulate agent capabilities for now.
-      const ann = await dispatch('page.annotate', {});
-      return {
-        success: true,
-        steps,
-        summary: `Goal received: "${goal}". This is a MVP agent task. Please use script.execute for deterministic behavior, or implement full LLM loop server-side.`,
-        annotation: ann
-      };
-    },
+
     // --- Navigation ---
-    navigate: async ({ url, waitUntil = 'domcontentloaded' }) => {
+    navigate: async ({ url, waitUntil = 'domcontentloaded', autoAnnotate = false }: any) => {
       const page = await p();
       await page.goto(url, { waitUntil });
-      return { url: page.url(), title: await page.title() };
+      const result: any = { url: page.url(), title: await page.title() };
+      if (autoAnnotate && dispatch) {
+        const ann = await dispatch('page.annotate', {});
+        Object.assign(result, ann);
+      }
+      return result;
     },
 
     search: async ({ engine = 'google', query }) => {
@@ -196,8 +195,30 @@ export function buildHandlers(broadcast: Broadcaster, dispatch?: (type: string, 
       return { ok: true, waited: ms };
     },
 
-    'dom.extract': async () => {
+    'dom.extract': async ({ type }: any = {}) => {
       const page = await p();
+      if (type === 'search-results') {
+        const results = await page.evaluate(() => {
+          return Array.from(document.querySelectorAll('h3')).map(h => ({
+            title: h.innerText,
+            url: h.closest('a')?.href || h.parentElement?.querySelector('a')?.href,
+            snippet: h.parentElement?.innerText?.slice(0, 300)
+          })).filter(x => x.title && x.url);
+        });
+        return { type, results };
+      } else if (type === 'form') {
+        const fields = await page.evaluate(() => {
+          return Array.from(document.querySelectorAll('input, select, textarea')).map((el: any) => ({
+            tag: el.tagName.toLowerCase(),
+            type: el.type,
+            name: el.name || el.id,
+            placeholder: el.placeholder,
+            required: el.required,
+            label: document.querySelector(`label[for="${el.id}"]`)?.textContent?.trim()
+          }));
+        });
+        return { type, fields };
+      }
       return { text: await page.evaluate(() => document.body.innerText) };
     },
 
@@ -359,10 +380,10 @@ export function buildHandlers(broadcast: Broadcaster, dispatch?: (type: string, 
     },
 
     // --- Vision stream ---
-    'vision.start': async ({ fps = 2 }: any = {}) => {
+    'vision.start': async ({ fps = 2, annotate = false }: any = {}) => {
       const page = await p();
-      vision.start(page, fps, (b64, meta) => broadcast({ type: 'vision.frame', payload: { image: b64, ...meta } }));
-      return { fps };
+      vision.start(page, fps, (b64, meta) => broadcast({ type: 'vision.frame', payload: { image: b64, ...meta } }), { annotate });
+      return { fps, annotate };
     },
     'vision.stop': async () => {
       vision.stop();
@@ -474,7 +495,7 @@ export function buildHandlers(broadcast: Broadcaster, dispatch?: (type: string, 
       while (retries > 0) {
         try {
           await page.waitForLoadState('domcontentloaded').catch(() => {});
-          const { elements, imageB64 } = await annotateInteractive(page);
+          const { elements, imageB64 } = await annotateInteractive(page, sessionStore.getStore());
           const dir = join(process.cwd(), 'logs', 'screenshots');
           await mkdir(dir, { recursive: true });
           const ts = new Date().toISOString().replace(/[:.]/g, '-');
@@ -507,9 +528,9 @@ export function buildHandlers(broadcast: Broadcaster, dispatch?: (type: string, 
 
     // Click by element ref: number (from last page.annotate) or natural description string.
     // Falls back to semantic resolver if ref is a string not found in cache.
-    'agent.click': async ({ ref, double = false }) => {
+    'agent.click': async ({ ref, double = false, retry = true }) => {
       const page = await p();
-      const el = findByRef(ref);
+      const el = await getEl(ref, retry);
       if (el) {
         const x = el.box.x + Math.round(el.box.w / 2);
         const y = el.box.y + Math.round(el.box.h / 2);
@@ -534,10 +555,10 @@ export function buildHandlers(broadcast: Broadcaster, dispatch?: (type: string, 
 
     // Type text into an element identified by ref (number or description).
     // Clears existing content first if clearFirst is true (default).
-    'agent.type': async ({ ref, text, clearFirst = true }) => {
+    'agent.type': async ({ ref, text, clearFirst = true, retry = true }) => {
       const page = await p();
       const val = String(text ?? '');
-      const el = findByRef(ref);
+      const el = await getEl(ref, retry);
       if (el) {
         const x = el.box.x + Math.round(el.box.w / 2);
         const y = el.box.y + Math.round(el.box.h / 2);
@@ -565,10 +586,11 @@ export function buildHandlers(broadcast: Broadcaster, dispatch?: (type: string, 
     },
 
     // Press a key (Enter, Tab, Escape, ArrowDown, …) optionally on a focused element.
-    'agent.press': async ({ key, ref }: any) => {
+    'agent.press': async ({ key, ref, retry = true }: any) => {
       const page = await p();
+      const beforeUrl = page.url();
       if (ref !== undefined) {
-        const el = findByRef(ref);
+        const el = await getEl(ref, retry);
         if (el) {
           const x = el.box.x + Math.round(el.box.w / 2);
           const y = el.box.y + Math.round(el.box.h / 2);
@@ -577,7 +599,14 @@ export function buildHandlers(broadcast: Broadcaster, dispatch?: (type: string, 
         }
       }
       await page.keyboard.press(String(key));
-      return { key };
+      
+      if (key === 'Enter') {
+        try {
+          await page.waitForLoadState('domcontentloaded', { timeout: 3000 });
+        } catch { /* ignored */ }
+      }
+      
+      return { key, navigated: page.url() !== beforeUrl, url: page.url() };
     },
 
     // Scroll the viewport. direction: 'down'|'up'|'left'|'right', amount in px.
@@ -608,9 +637,9 @@ export function buildHandlers(broadcast: Broadcaster, dispatch?: (type: string, 
     },
 
     // Hover over an element (useful before annotating dynamic menus).
-    'agent.hover': async ({ ref }: any) => {
+    'agent.hover': async ({ ref, retry = true }: any) => {
       const page = await p();
-      const el = findByRef(ref);
+      const el = await getEl(ref, retry);
       if (el) {
         const x = el.box.x + Math.round(el.box.w / 2);
         const y = el.box.y + Math.round(el.box.h / 2);
@@ -626,9 +655,9 @@ export function buildHandlers(broadcast: Broadcaster, dispatch?: (type: string, 
     },
 
     // Select an option in a <select> by visible text or value.
-    'agent.select': async ({ ref, option }: any) => {
+    'agent.select': async ({ ref, option, retry = true }: any) => {
       const page = await p();
-      const el = findByRef(ref);
+      const el = await getEl(ref, retry);
       let loc;
       if (el) {
         loc = page.locator(`${el.tag}`, { hasText: el.name }).or(page.locator(`[aria-label="${el.name}"]`)).first();

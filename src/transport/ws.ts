@@ -3,7 +3,8 @@ import { readFile } from 'node:fs/promises';
 import { join, extname } from 'node:path';
 import { WebSocketServer, WebSocket } from 'ws';
 import { buildHandlers } from '../browser/handlers.js';
-import { sessionStore } from '../browser/controller.js';
+import { sessionStore, controller } from '../browser/controller.js';
+import { log } from '../logger.js';
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -57,8 +58,15 @@ export function startServer(port = 8080) {
         return;
       }
       if (url === '/health') {
+        const { controller } = await import('../browser/controller.js');
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: true, clients: clients.size }));
+        res.end(JSON.stringify({
+          ok: true,
+          wsClients: clients.size,
+          browserReady: !!(controller as any).defaultContext || controller.listSessions().length > 0,
+          sessions: controller.listSessions().length,
+          uptime: process.uptime()
+        }));
         return;
       }
       res.writeHead(404);
@@ -70,10 +78,29 @@ export function startServer(port = 8080) {
   });
 
   const wss = new WebSocketServer({ server: http, path: '/ws/browser-bridge' });
+  const clientLimits = new Map<WebSocket, { count: number; resetAt: number }>();
+
   wss.on('connection', (ws) => {
     clients.add(ws);
-    ws.on('close', () => clients.delete(ws));
+    clientLimits.set(ws, { count: 0, resetAt: Date.now() + 60000 });
+    ws.on('close', () => {
+      clients.delete(ws);
+      clientLimits.delete(ws);
+    });
     ws.on('message', async (raw) => {
+      const limit = clientLimits.get(ws);
+      const now = Date.now();
+      if (limit) {
+        if (now > limit.resetAt) {
+          limit.count = 0;
+          limit.resetAt = now + 60000;
+        }
+        limit.count++;
+        if (limit.count > 100) {
+          ws.send(JSON.stringify({ ok: false, error: 'rate limited' }));
+          return;
+        }
+      }
       let msg: any;
       try {
         msg = JSON.parse(raw.toString());
@@ -82,6 +109,7 @@ export function startServer(port = 8080) {
         return;
       }
       const { id, type, payload } = msg;
+      log('info', 'received command', { type, sessionId: payload?.sessionId || 'default' });
       const handler = handlers[type];
       if (!handler) {
         ws.send(JSON.stringify({ id, ok: false, error: `unknown command: ${type}` }));
@@ -92,17 +120,19 @@ export function startServer(port = 8080) {
         const result = await sessionStore.run(payloadObj.sessionId, async () => {
           return await handler(payloadObj);
         });
+        log('info', 'command result', { type, ok: true });
         ws.send(JSON.stringify({ id, type, ok: true, result }));
       } catch (err: any) {
+        log('error', 'command error', { type, error: err?.message || String(err) });
         ws.send(JSON.stringify({ id, type, ok: false, error: err?.message ?? String(err) }));
       }
     });
     ws.send(JSON.stringify({ type: 'hello', payload: { version: '3.0.0' } }));
   });
+  controller.onEvent((evt) => broadcast(evt));
 
   http.listen(port, () => {
-    console.log(`[bridge] http://localhost:${port}/viewer`);
-    console.log(`[bridge] ws://localhost:${port}/ws/browser-bridge`);
+    log('info', 'server started', { port, viewer: `http://localhost:${port}/viewer`, ws: `ws://localhost:${port}/ws/browser-bridge` });
   });
 
   return { http, wss, broadcast };
