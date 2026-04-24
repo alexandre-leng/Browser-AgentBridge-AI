@@ -1,7 +1,6 @@
 import type { Page } from 'playwright';
 import crypto from 'node:crypto';
 import { collectElements } from './agent.js';
-import { sessionStore } from './controller.js';
 
 export class VisionStream {
   private timer: NodeJS.Timeout | null = null;

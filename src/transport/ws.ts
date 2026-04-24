@@ -1,8 +1,8 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { join, extname } from 'node:path';
+import { join, extname, resolve, sep } from 'node:path';
 import { WebSocketServer, WebSocket } from 'ws';
-import { buildHandlers } from '../browser/handlers.js';
+import { buildHandlers } from '../browser/handlers/index.js';
 import { sessionStore, controller } from '../browser/controller.js';
 import { log } from '../logger.js';
 
@@ -14,6 +14,48 @@ const MIME: Record<string, string> = {
   '.jpg': 'image/jpeg',
   '.svg': 'image/svg+xml',
 };
+
+const SECURITY_HEADERS: Record<string, string> = {
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+  'Referrer-Policy': 'no-referrer',
+};
+
+const VIEWER_CSP = "default-src 'self'; img-src 'self' data: blob:; connect-src 'self' ws: wss:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'";
+
+const BRIDGE_TOKEN = process.env.BRIDGE_TOKEN ?? '';
+const BIND_HOST = process.env.BRIDGE_HOST ?? '127.0.0.1';
+const ALLOWED_ORIGINS = (process.env.BRIDGE_ALLOWED_ORIGINS ?? '').split(',').map(s => s.trim()).filter(Boolean);
+
+function serveFile(baseDir: string, rawFile: string, res: ServerResponse): Promise<void> {
+  return (async () => {
+    const target = resolve(baseDir, rawFile);
+    const baseResolved = resolve(baseDir);
+    if (target !== baseResolved && !target.startsWith(baseResolved + sep)) {
+      res.writeHead(403, SECURITY_HEADERS);
+      res.end('forbidden');
+      return;
+    }
+    try {
+      const data = await readFile(target);
+      res.writeHead(200, {
+        'Content-Type': MIME[extname(target)] ?? 'application/octet-stream',
+        ...SECURITY_HEADERS,
+      });
+      res.end(data);
+    } catch {
+      res.writeHead(404, SECURITY_HEADERS);
+      res.end('not found');
+    }
+  })();
+}
+
+export function scrubError(err: unknown): { message: string; code: string } {
+  const raw = (err as any)?.message ?? String(err);
+  const firstLine = String(raw).split('\n')[0].slice(0, 300);
+  const code = (err as any)?.name ?? 'Error';
+  return { message: firstLine, code };
+}
 
 export function startServer(port = 8080) {
   const clients = new Set<WebSocket>();
@@ -29,55 +71,74 @@ export function startServer(port = 8080) {
   };
   Object.assign(handlers, buildHandlers(broadcast, dispatch));
 
-  const viewerDir = join(process.cwd(), 'src', 'viewer');
-  const capturesDir = join(process.cwd(), 'logs', 'screenshots');
+  const viewerDir = resolve(process.cwd(), 'src', 'viewer');
+  const capturesDir = resolve(process.cwd(), 'logs', 'screenshots');
 
   const http = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     try {
       const url = req.url ?? '/';
       if (url === '/' || url === '/viewer' || url === '/viewer/') {
         const html = await readFile(join(viewerDir, 'index.html'), 'utf8');
-        res.writeHead(200, { 'Content-Type': MIME['.html'] });
+        res.writeHead(200, {
+          'Content-Type': MIME['.html'],
+          'Content-Security-Policy': VIEWER_CSP,
+          ...SECURITY_HEADERS,
+        });
         res.end(html);
         return;
       }
       if (url.startsWith('/viewer/')) {
-        const file = url.replace(/^\/viewer\//, '');
-        const p = join(viewerDir, file);
-        const data = await readFile(p);
-        res.writeHead(200, { 'Content-Type': MIME[extname(p)] ?? 'application/octet-stream' });
-        res.end(data);
+        const file = decodeURIComponent(url.replace(/^\/viewer\//, '').split('?')[0]);
+        await serveFile(viewerDir, file, res);
         return;
       }
       if (url.startsWith('/captures/')) {
-        const file = url.replace(/^\/captures\//, '');
-        const p = join(capturesDir, file);
-        const data = await readFile(p);
-        res.writeHead(200, { 'Content-Type': MIME[extname(p)] ?? 'application/octet-stream' });
-        res.end(data);
+        const file = decodeURIComponent(url.replace(/^\/captures\//, '').split('?')[0]);
+        await serveFile(capturesDir, file, res);
         return;
       }
       if (url === '/health') {
-        const { controller } = await import('../browser/controller.js');
-        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.writeHead(200, { 'Content-Type': 'application/json', ...SECURITY_HEADERS });
         res.end(JSON.stringify({
           ok: true,
           wsClients: clients.size,
-          browserReady: !!(controller as any).defaultContext || controller.listSessions().length > 0,
+          browserReady: controller.isReady(),
           sessions: controller.listSessions().length,
           uptime: process.uptime()
         }));
         return;
       }
-      res.writeHead(404);
+      res.writeHead(404, SECURITY_HEADERS);
       res.end('not found');
     } catch {
-      res.writeHead(500);
+      res.writeHead(500, SECURITY_HEADERS);
       res.end('error');
     }
   });
 
-  const wss = new WebSocketServer({ server: http, path: '/ws/browser-bridge' });
+  const wss = new WebSocketServer({
+    server: http,
+    path: '/ws/browser-bridge',
+    verifyClient: (info, done) => {
+      const origin = info.origin ?? '';
+      if (ALLOWED_ORIGINS.length > 0 && origin && !ALLOWED_ORIGINS.includes(origin)) {
+        log('warn', 'ws rejected: origin', { origin });
+        return done(false, 403, 'origin not allowed');
+      }
+      if (BRIDGE_TOKEN) {
+        const auth = info.req.headers['authorization'] ?? '';
+        const urlStr = info.req.url ?? '';
+        const qTokenMatch = urlStr.match(/[?&]token=([^&]+)/);
+        const qToken = qTokenMatch ? decodeURIComponent(qTokenMatch[1]) : '';
+        const bearer = typeof auth === 'string' && auth.startsWith('Bearer ') ? auth.slice(7) : '';
+        if (bearer !== BRIDGE_TOKEN && qToken !== BRIDGE_TOKEN) {
+          log('warn', 'ws rejected: token', {});
+          return done(false, 401, 'unauthorized');
+        }
+      }
+      done(true);
+    }
+  });
   const clientLimits = new Map<WebSocket, { count: number; resetAt: number }>();
 
   wss.on('connection', (ws) => {
@@ -109,9 +170,11 @@ export function startServer(port = 8080) {
         return;
       }
       const { id, type, payload } = msg;
-      log('info', 'received command', { type, sessionId: payload?.sessionId || 'default', payload });
+      const sessionId = payload?.sessionId || 'default';
+      const t0 = Date.now();
       const handler = handlers[type];
       if (!handler) {
+        log('warn', 'unknown command', { sessionId, cmd: type });
         ws.send(JSON.stringify({ id, ok: false, error: `unknown command: ${type}` }));
         return;
       }
@@ -120,20 +183,38 @@ export function startServer(port = 8080) {
         const result = await sessionStore.run(payloadObj.sessionId, async () => {
           return await handler(payloadObj);
         });
-        log('info', 'command result', { type, ok: true });
+        const durationMs = Date.now() - t0;
+        log('info', 'cmd ok', { sessionId, cmd: type, ok: true, durationMs });
         ws.send(JSON.stringify({ id, type, ok: true, result }));
-      } catch (err: any) {
-        log('error', 'command error', { type, error: err?.message || String(err) });
-        ws.send(JSON.stringify({ id, type, ok: false, error: err?.message ?? String(err) }));
+      } catch (err) {
+        const durationMs = Date.now() - t0;
+        const { message, code } = scrubError(err);
+        log('error', 'cmd err', { sessionId, cmd: type, ok: false, durationMs, errorCode: code, error: message });
+        ws.send(JSON.stringify({ id, type, ok: false, error: message, code }));
       }
     });
     ws.send(JSON.stringify({ type: 'hello', payload: { version: '3.0.0' } }));
   });
-  controller.onEvent((evt) => broadcast(evt));
+  const unsubscribe = controller.onEvent((evt) => broadcast(evt));
 
-  http.listen(port, () => {
-    log('info', 'server started', { port, viewer: `http://localhost:${port}/viewer`, ws: `ws://localhost:${port}/ws/browser-bridge` });
+  http.listen(port, BIND_HOST, () => {
+    log('info', 'server started', {
+      host: BIND_HOST,
+      port,
+      viewer: `http://${BIND_HOST}:${port}/viewer`,
+      ws: `ws://${BIND_HOST}:${port}/ws/browser-bridge`,
+      authRequired: !!BRIDGE_TOKEN,
+      originCheck: ALLOWED_ORIGINS.length > 0
+    });
   });
 
-  return { http, wss, broadcast };
+  const close = async () => {
+    unsubscribe();
+    for (const c of clients) { try { c.close(); } catch { /* ignore */ } }
+    clients.clear();
+    await new Promise<void>((r) => wss.close(() => r()));
+    await new Promise<void>((r) => http.close(() => r()));
+  };
+
+  return { http, wss, broadcast, close, unsubscribe };
 }

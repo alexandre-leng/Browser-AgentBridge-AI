@@ -1,5 +1,7 @@
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { readdir, unlink } from 'node:fs/promises';
+import { join } from 'node:path';
 import { STEALTH_SCRIPT } from './stealth.js';
 import { log } from '../logger.js';
 
@@ -81,7 +83,12 @@ export class BrowserController {
     }
 
     await ctx.addInitScript(STEALTH_SCRIPT);
-    
+
+    const defaultTimeout = Number(process.env.BRIDGE_DEFAULT_TIMEOUT_MS ?? 15000);
+    const defaultNavTimeout = Number(process.env.BRIDGE_DEFAULT_NAV_TIMEOUT_MS ?? 20000);
+    ctx.setDefaultTimeout(defaultTimeout);
+    ctx.setDefaultNavigationTimeout(defaultNavTimeout);
+
     ctx.on('page', (p) => {
       p.on('dialog', async (dialog) => {
         log('info', 'dialog handled', { type: dialog.type(), message: dialog.message() });
@@ -180,15 +187,36 @@ export class BrowserController {
       for (const ctx of this.contexts.values()) await ctx.close().catch(() => {});
       this.contexts.clear();
       this.pages.clear();
+      await this.cleanupScreenshots();
     } else {
       await this.contexts.get(sessionId)?.close().catch(() => {});
       this.contexts.delete(sessionId);
       this.pages.delete(sessionId);
+      await this.cleanupScreenshots(sessionId);
+    }
+  }
+
+  private async cleanupScreenshots(sessionId?: string) {
+    try {
+      const dir = join(process.cwd(), 'logs', 'screenshots');
+      const files = await readdir(dir).catch(() => []);
+      for (const file of files) {
+        if (!sessionId || file.includes(`-session-${sessionId}.`)) {
+          await unlink(join(dir, file)).catch(() => {});
+        }
+      }
+      log('info', 'screenshots cleaned', { sessionId: sessionId || 'all' });
+    } catch (e: any) {
+      log('warn', 'failed to cleanup screenshots', { error: e.message });
     }
   }
   
   listSessions() {
     return Array.from(this.contexts.keys());
+  }
+
+  isReady(): boolean {
+    return !!this.defaultContext || this.contexts.size > 0;
   }
 }
 

@@ -4,18 +4,29 @@ import readline from 'node:readline';
 
 const WS_URL = process.env.BRIDGE_URL || 'ws://localhost:8080/ws/browser-bridge';
 
-function parseArgs(input: string): string[] {
+export function parseArgs(input: string): string[] {
   const args: string[] = [];
   let current = '';
-  let inQuotes = false;
+  let quote: '"' | "'" | null = null;
+  let escaped = false;
   for (let i = 0; i < input.length; i++) {
     const c = input[i];
-    if (c === '"') inQuotes = !inQuotes;
-    else if (c === ' ' && !inQuotes) {
-      if (current) args.push(current);
-      current = '';
-    } else current += c;
+    if (escaped) { current += c; escaped = false; continue; }
+    if (c === '\\') { escaped = true; continue; }
+    if (quote) {
+      if (c === quote) { quote = null; continue; }
+      current += c;
+      continue;
+    }
+    if (c === '"' || c === "'") { quote = c; continue; }
+    if (c === ' ' || c === '\t') {
+      if (current) { args.push(current); current = ''; }
+      continue;
+    }
+    current += c;
   }
+  if (quote) throw new Error(`unterminated ${quote} quote`);
+  if (escaped) throw new Error('trailing backslash');
   if (current) args.push(current);
   return args;
 }
@@ -124,7 +135,7 @@ async function main() {
     
     if (msg.ok) {
       const res = msg.result;
-      let out: any = { ok: true };
+      const out: any = { ok: true };
       
       if (command.type === 'script.execute') {
         out.results = res.allResults?.map((r: any) => {
@@ -167,4 +178,14 @@ async function main() {
   }, 30000);
 }
 
-main();
+import { fileURLToPath } from 'node:url';
+import { realpathSync } from 'node:fs';
+
+const isMain = (() => {
+  try {
+    return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1] ?? '');
+  } catch {
+    return false;
+  }
+})();
+if (isMain) main();

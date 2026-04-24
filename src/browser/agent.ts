@@ -64,7 +64,19 @@ export function findByRef(ref: string | number, sessionId: string = 'default'): 
     }
   }
   
-  return highestScore > 0 ? bestMatch : null;
+  return highestScore >= 60 ? bestMatch : null;
+}
+
+export function findSimilar(query: string, sessionId: string = 'default', limit = 5): AgentElement[] {
+  const cache = getAgentElements(sessionId);
+  const q = query.toLowerCase().trim();
+  
+  return cache
+    .map(el => ({ el, score: scoreMatch(el, q) }))
+    .filter(m => m.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map(m => m.el);
 }
 
 const INTERACTIVE_SEL = [
@@ -90,14 +102,16 @@ const INTERACTIVE_SEL = [
 /** Collect all in-viewport interactive elements with bounding boxes + accessible names. */
 async function collectElementsRecursive(frame: Frame, offset = { x: 0, y: 0 }, context = { id: 1 }): Promise<AgentElement[]> {
   const elements = await frame.evaluate(({ sel, offset }) => {
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
     const seen = new Set<string>();
     const result: any[] = [];
     
     for (const el of Array.from(document.querySelectorAll(sel))) {
+      // Skip invisible or off-screen
+      const style = window.getComputedStyle(el);
+      if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') continue;
+      if (el.getAttribute('aria-hidden') === 'true') continue;
+      
       const r = el.getBoundingClientRect();
-      // Skip invisible or off-screen (relative to current frame)
       if (r.width < 4 || r.height < 4) continue;
       
       // Dedup by position
@@ -150,7 +164,7 @@ async function collectElementsRecursive(frame: Frame, offset = { x: 0, y: 0 }, c
         const childElements = await collectElementsRecursive(child, { x: offset.x + box.x, y: offset.y + box.y }, context);
         allElements = allElements.concat(childElements);
       }
-    } catch (e) {
+    } catch {
       // Ignore frame access errors
     }
   }

@@ -1,4 +1,4 @@
-import type { Page, Locator, FrameLocator } from 'playwright';
+import type { Page, Locator } from 'playwright';
 
 export type Query = string;
 
@@ -9,7 +9,8 @@ export function detectKind(q: any): 'xpath' | 'css' | 'text' {
   const s = String(q).trim();
   if (s.startsWith('//') || s.startsWith('(/') || s.startsWith('/html')) return 'xpath';
   if (/^xpath=/.test(s)) return 'xpath';
-  if (/[#.\[\]>]|::/.test(s) || /^[a-z]+\[/i.test(s)) return 'css';
+  if (/^[#.]/.test(s) && s.length > 1) return 'css';
+  if (/[\[\]>]|::/.test(s) || /^[a-z]+\[/i.test(s)) return 'css';
   return 'text';
 }
 

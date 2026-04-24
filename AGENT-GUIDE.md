@@ -1,59 +1,77 @@
-# 🤖 OpenClaw Browser Bridge — Agent Guide
+# 🦾 AI Agent Guide for OpenClaw Bridge
 
-This guide is designed for AI Agents (LLMs) to help them interact with the browser bridge efficiently and reliably.
+> **Read this if you are an AI model (Claude, GPT, etc.) tasked with browsing the web.**
 
----
-
-## 🏎️ Performance Tip: Use the Batch "run" Command
-Each command sent over WebSocket or CLI has overhead (latency, connection time). To minimize time, group your actions into a single `run` command.
-
-**Example of a fast workflow:**
-Instead of 5 separate calls, do:
-`bridge run "navigate https://site.com" "annotate" "click 7" "type 7 text" "summary"`
+OpenClaw is designed to be your "Eyes and Hands" on the web. Unlike other tools that send you raw HTML (too many tokens) or raw screenshots (too hard to calculate coordinates), OpenClaw gives you **Numerical Grounding**.
 
 ---
 
-## 👁️ Vision: The Annotate Workflow
-Don't guess CSS selectors. Use the visual annotation system:
+## 👁️ Step 1: See the Page (`page.annotate`)
+Your first step on any new page should always be `page.annotate`.
+It returns:
+1.  **A screenshot** (hosted at a URL).
+2.  **A list of elements** like `{ "id": 7, "role": "button", "name": "Search" }`.
 
-1.  **Annotate**: Call `page.annotate` or `bridge annotate`.
-2.  **Analyze**: You will receive a list of elements with numeric IDs (`ref`).
-3.  **Interact**: Use `agent.click {ref: N}` or `agent.type {ref: N, text: "..."}`.
-
-**Why?** IDs are much more stable than CSS classes and handle IFrames automatically.
-
----
-
-## 📄 Content Extraction: Save your Context Window
-Sending the entire HTML of a page will consume too many tokens. Use structured extraction instead:
-
--   `agent.summary`: Get a high-level view (URL, Title, top interactive elements).
--   `dom.extract --type=article`: Get the main text content.
--   `dom.extract --type=search-results`: Get a clean JSON of search hits.
--   `dom.extract --type=table`: Get tabular data as JSON arrays.
+**Strategy:** Look at the screenshot to understand the layout, then find the `id` of the element you want to interact with in the JSON list.
 
 ---
 
-## 🧭 Navigation & Waiting
-Web pages are slow. The bridge helps you wait:
+## 🖱️ Step 2: Interact (`agent.click` / `agent.type`)
+Instead of guessing a CSS selector, use the `ref` (the ID from Step 1).
 
--   `agent.press "Enter"`: Automatically waits for navigation to complete.
--   `wait`: Without arguments, waits for the `load` event.
--   `agent.waitFor --for text "Success"`: Waits for a specific text to appear.
+-   **To click:** Use `agent.click { ref: 7 }`.
+-   **To type:** Use `agent.type { ref: 7, text: "my search query" }`.
 
----
-
-## 🛠️ Error Handling
-If an interaction fails (e.g., `Element not found`), the bridge will return a list of **Available Elements** currently on the page. Use this list to find the correct ID if the page refreshed or shifted.
+**Note:** `agent.type` automatically clears the field before typing. If you need to append, use the low-level `input.text`.
 
 ---
 
-## 📝 Best Practices Checklist
-- [ ] Group related commands in a `run` batch.
-- [ ] Use `annotate` before clicking to ensure IDs are fresh.
-- [ ] Use `summary` before doing deep extraction to confirm you are on the right page.
-- [ ] Prefer `agent.*` commands (ref-based) over `dom.*` commands (selector-based).
+## ⚡ Step 3: Use Batching (`run`)
+Don't send one command at a time. It's slow. Use the `run` command to pipeline your intent.
+
+**Pro Workflow:**
+```bash
+# Efficiently navigate and prepare the page in one go
+run "navigate https://github.com" "agent.waitFor --for text 'GitHub'" "page.annotate"
+```
 
 ---
 
-*Happy browsing!*
+## 📊 Step 4: Extract Data (`dom.extract`)
+Don't try to parse the entire page text. It's full of navigation links and ads. Use the specialized extractors:
+
+-   `dom.extract { type: "search-results" }`: For Google/Bing.
+-   `dom.extract { type: "form" }`: To see all input fields and their labels.
+-   `dom.extract { type: "article" }`: To read a blog post or news item.
+
+---
+
+## 🛠️ Error Recovery
+If a command fails with `Element not found`, don't panic. The bridge will return **Suggestions**.
+- Example: `Element "7" not found. Did you mean: 8: Login, 9: Register?`
+
+**Strategy:** If the page changed, simply call `page.annotate` again to refresh your numerical map.
+
+---
+
+## 🧭 Best Practices for Agents
+1.  **Always `annotate`** before an interaction if you are unsure if the page has changed.
+2.  **Wait for Navigation**: If you press Enter or click a link, wait 1-2 seconds or use `agent.waitFor` before calling `annotate`.
+3.  **Use `agent.summary`**: If you just need to know "where am I?", `summary` gives you the URL, Title, and top elements without the heavy screenshot payload.
+4.  **Trust the Human**: If you get stuck on a CAPTCHA or a complex login, ask the human to use the **Live Viewer** at `http://localhost:8080/viewer` to help you.
+
+---
+
+## 📋 Capabilities Matrix
+
+| If you want to... | Use this command |
+| :--- | :--- |
+| Find clikable things | `page.annotate` |
+| Search on Google | `agent.search { query: "..." }` |
+| Read a long article | `dom.extract { type: "article" }` |
+| Fill a complex form | `dom.extract { type: "form" }` then `agent.type` |
+| Scroll through a feed | `agent.scroll { direction: "down" }` |
+
+---
+
+**Remember:** You have the precision of a surgeon. Use IDs, not guesses.

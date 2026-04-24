@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="fr">
+<html lang="en">
 <head>
 <meta charset="utf-8" />
 <title>OpenClaw Viewer</title>
@@ -29,12 +29,12 @@
 <header>
   <button id="start">▶ Start</button>
   <button id="stop">■ Stop</button>
-  <button id="takeover" title="Capture souris + clavier">🖱 Prendre le contrôle</button>
+  <button id="takeover" title="Capture mouse + keyboard">🖱 Take Control</button>
   <button id="toggleAnn">🏷 Annotations</button>
   <input id="fps" type="number" value="2" min="1" max="15" style="width:56px" title="FPS" />
   <input id="url" type="text" placeholder="https://…" />
-  <button id="go">Aller</button>
-  <span id="help">Takeover: <kbd>Esc</kbd> pour sortir</span>
+  <button id="go">Go</button>
+  <span id="help">Takeover: Press <kbd>Esc</kbd> to exit</span>
   <span id="meta">disconnected</span>
 </header>
 <div id="stage">
@@ -138,15 +138,12 @@ document.getElementById('stop').onclick = () => send('vision.stop', {});
 document.getElementById('go').onclick = () => { if ($url.value) send('navigate', { url: $url.value }); };
 $url.addEventListener('keydown', (e) => { if (e.key === 'Enter' && $url.value) send('navigate', { url: $url.value }); });
 
-
-
-
 $takeover.onclick = () => setTakeover(!takeover);
 function setTakeover(on) {
   takeover = on;
   $wrap.classList.toggle('takeover', on);
   $takeover.classList.toggle('active', on);
-  $takeover.textContent = on ? '✋ Relâcher' : '🖱 Prendre le contrôle';
+  $takeover.textContent = on ? '✋ Release' : '🖱 Take Control';
   if (on) $wrap.focus();
   updateMeta();
 }
@@ -205,7 +202,6 @@ $wrap.addEventListener('mousedown', (ev) => {
 });
 $wrap.addEventListener('mouseup', (ev) => {
   if (!takeover) {
-    // legacy single-click behaviour
     const { x, y } = toPage(ev);
     send('mouse.click', { x, y });
     return;
@@ -273,8 +269,6 @@ const ro = new ResizeObserver(() => {
   if (resizeTimer) clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => {
     const rect = $frame.getBoundingClientRect();
-    // Only suggest viewport change if frame has grown meaningfully beyond current pageW/H.
-    // We pick a target matching the displayed size to avoid letterboxing.
     const targetW = Math.round(rect.width);
     const targetH = Math.round(rect.height);
     if (targetW > 320 && Math.abs(targetW - pageW) > 80) {
