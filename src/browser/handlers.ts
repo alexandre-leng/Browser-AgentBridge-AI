@@ -44,7 +44,7 @@ export function buildHandlers(broadcast: Broadcaster, dispatch?: (type: string, 
           ok: true,
           url: page.url(),
           title: await page.title().catch(() => ''),
-          loading: false,
+          ready: true,
           sessionId: sessionStore.getStore()
         };
       } catch (e: any) {

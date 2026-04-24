@@ -98,9 +98,13 @@ switch (cmd) {
     }
 }
 
-if (flags.wait > 0 && type !== 'script.execute') {
-  payload = { commands: [{ type, payload }, { type: 'wait', payload: { ms: flags.wait } }], returnAllResults: false };
-  type = 'script.execute';
+if (flags.wait > 0) {
+  if (type === 'script.execute') {
+    payload.commands.push({ type: 'wait', payload: { ms: flags.wait } });
+  } else {
+    payload = { commands: [{ type, payload }, { type: 'wait', payload: { ms: flags.wait } }], returnAllResults: false };
+    type = 'script.execute';
+  }
 }
 
 const id = Math.random().toString(36).slice(2);

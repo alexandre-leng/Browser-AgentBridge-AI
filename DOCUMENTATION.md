@@ -62,8 +62,16 @@ cd C:\Users\Zalex\.openclaw\workspace\openclaw-browser-bridge
 ```
 
 Chaque commande retourne du JSON propre et concis :
+
 ```json
-{"ok":true,"elements":20,"image":"http://localhost:8080/captures/annotate-xxx.jpg","url":"https://www.google.com","title":"Google","top":[{"id":7,"role":"combobox","name":"Rech."}]}
+{
+  "ok": true,
+  "elements": 20,
+  "image": "http://localhost:8080/captures/annotate-xxx.jpg",
+  "url": "https://www.google.com",
+  "title": "Google",
+  "top": [{ "id": 7, "role": "combobox", "name": "Rech." }]
+}
 ```
 
 ### Flags optionnels
@@ -96,15 +104,15 @@ Chaque commande retourne du JSON propre et concis :
 
 ### Composants
 
-| Fichier | Rôle |
-|---|---|
-| `src/server/server.ts` | Serveur WebSocket + HTTP |
-| `src/browser/handlers.ts` | Handlers de commandes (navigate, annotate, click, etc.) |
-| `src/browser/agent.ts` | Moteur d'annotation (ARIA + screenshot numéroté) |
-| `src/browser/controller.ts` | Contrôleur Playwright, sessions, multi-tab |
-| `src/cli/bridge.ts` | CLI natif (`bridge.cmd`) |
-| `src/cli/live.ts` | CLI WebSocket bas niveau (legacy) |
-| `bridge.cmd` / `bridge.ps1` | Wrappers Windows |
+| Fichier                     | Rôle                                                    |
+| --------------------------- | ------------------------------------------------------- |
+| `src/server/server.ts`      | Serveur WebSocket + HTTP                                |
+| `src/browser/handlers.ts`   | Handlers de commandes (navigate, annotate, click, etc.) |
+| `src/browser/agent.ts`      | Moteur d'annotation (ARIA + screenshot numéroté)        |
+| `src/browser/controller.ts` | Contrôleur Playwright, sessions, multi-tab              |
+| `src/cli/bridge.ts`         | CLI natif (`bridge.cmd`)                                |
+| `src/cli/live.ts`           | CLI WebSocket bas niveau (legacy)                       |
+| `bridge.cmd` / `bridge.ps1` | Wrappers Windows                                        |
 
 ---
 
@@ -112,75 +120,75 @@ Chaque commande retourne du JSON propre et concis :
 
 ### CLI (`bridge.cmd`)
 
-| Commande | Args | Retour |
-|---|---|---|
-| `navigate <url>` | URL | `{ok, url, title}` |
-| `annotate` | — | `{ok, elements, image, url, title, top[]}` |
-| `snapshot` | — | `{ok, elements[], url, title}` |
-| `click <ref>` | ID numérique | `{ok, clicked, ref}` |
-| `type <ref> <text>` | ID + texte | `{ok, typed, ref}` |
-| `press <key>` | Enter, Tab, Escape… | `{ok, key, navigated}` |
-| `scroll <px>` | Pixels | `{ok, scrolled}` |
-| `screenshot` | — | `{ok, image}` |
-| `extract` | — | `{ok, text}` |
-| `status` | — | `{ok, url, title, loading}` |
-| `run <cmd1> <cmd2> ...` | Commandes batch | `{ok, results[], finalResult, durationMs}` |
+| Commande                | Args                | Retour                                     |
+| ----------------------- | ------------------- | ------------------------------------------ |
+| `navigate <url>`        | URL                 | `{ok, url, title}`                         |
+| `annotate`              | —                   | `{ok, elements, image, url, title, top[]}` |
+| `snapshot`              | —                   | `{ok, elements[], url, title}`             |
+| `click <ref>`           | ID numérique        | `{ok, clicked, ref}`                       |
+| `type <ref> <text>`     | ID + texte          | `{ok, typed, ref}`                         |
+| `press <key>`           | Enter, Tab, Escape… | `{ok, key, navigated}`                     |
+| `scroll <px>`           | Pixels              | `{ok, scrolled}`                           |
+| `screenshot`            | —                   | `{ok, image}`                              |
+| `extract`               | —                   | `{ok, text}`                               |
+| `status`                | —                   | `{ok, url, title, ready}`                  |
+| `run <cmd1> <cmd2> ...` | Commandes batch     | `{ok, results[], finalResult, durationMs}` |
 
 ### Handlers WebSocket (avancé)
 
 #### Agent (humanisé, anti-détection)
 
-| Handler | Payload | Description |
-|---|---|---|
-| `agent.click` | `{ref}` ou `{ref, text}` | Clic humain sur élément annoté |
-| `agent.type` | `{ref, text}` | Saisie humaine (efface avant) |
-| `agent.press` | `{key}` | Touche clavier |
-| `agent.scroll` | `{direction, amount}` | Scroll humain (multi-steps) |
-| `agent.hover` | `{ref}` | Survol humain |
-| `agent.select` | `{ref, option}` | Sélection dropdown |
-| `agent.waitFor` | `{text}` ou `{url}` | Attend un texte ou URL |
+| Handler         | Payload                  | Description                    |
+| --------------- | ------------------------ | ------------------------------ |
+| `agent.click`   | `{ref}` ou `{ref, text}` | Clic humain sur élément annoté |
+| `agent.type`    | `{ref, text}`            | Saisie humaine (efface avant)  |
+| `agent.press`   | `{key}`                  | Touche clavier                 |
+| `agent.scroll`  | `{direction, amount}`    | Scroll humain (multi-steps)    |
+| `agent.hover`   | `{ref}`                  | Survol humain                  |
+| `agent.select`  | `{ref, option}`          | Sélection dropdown             |
+| `agent.waitFor` | `{text}` ou `{url}`      | Attend un texte ou URL         |
 
 #### Page (vision structurée)
 
-| Handler | Payload | Description |
-|---|---|---|
-| `page.annotate` | `{}` | Screenshot + numéros verts + liste `{id, role, name, box}` |
-| `page.snapshot` | `{}` | Liste compacte éléments ARIA (sans screenshot) |
+| Handler         | Payload | Description                                                |
+| --------------- | ------- | ---------------------------------------------------------- |
+| `page.annotate` | `{}`    | Screenshot + numéros verts + liste `{id, role, name, box}` |
+| `page.snapshot` | `{}`    | Liste compacte éléments ARIA (sans screenshot)             |
 
 #### Input brut (temps réel, pas d'humanisation)
 
-| Handler | Payload | Description |
-|---|---|---|
-| `input.mouseMove` | `{x, y}` | Déplacer curseur instantanément |
-| `input.mouseDown` | `{x, y, button}` | Presse bouton souris |
-| `input.mouseUp` | `{x, y, button}` | Relâche bouton souris |
-| `input.wheel` | `{x, y, deltaX, deltaY}` | Scroll molette |
-| `input.keyDown` | `{key}` | Presse touche |
-| `input.keyUp` | `{key}` | Relâche touche |
-| `input.text` | `{text}` | Insertion texte instantanée |
-| `input.focus` | `{}` | Focus page au premier plan |
+| Handler           | Payload                  | Description                     |
+| ----------------- | ------------------------ | ------------------------------- |
+| `input.mouseMove` | `{x, y}`                 | Déplacer curseur instantanément |
+| `input.mouseDown` | `{x, y, button}`         | Presse bouton souris            |
+| `input.mouseUp`   | `{x, y, button}`         | Relâche bouton souris           |
+| `input.wheel`     | `{x, y, deltaX, deltaY}` | Scroll molette                  |
+| `input.keyDown`   | `{key}`                  | Presse touche                   |
+| `input.keyUp`     | `{key}`                  | Relâche touche                  |
+| `input.text`      | `{text}`                 | Insertion texte instantanée     |
+| `input.focus`     | `{}`                     | Focus page au premier plan      |
 
-#### DOM (legacy, préférer agent.*)
+#### DOM (legacy, préférer agent.\*)
 
-| Handler | Payload | Description |
-|---|---|---|
-| `dom.click` | `{text, selector, label}` | Click par texte/sélecteur |
-| `dom.type` | `{selector, value}` | Type dans un input |
-| `dom.fillForm` | `{fields: { "Label": "valeur" }}` | Remplir plusieurs champs |
-| `dom.search` | `{text}` | Chercher texte dans la page |
-| `dom.extract` | `{type}` | Extraire contenu structuré |
-| `dom.hover` | `{text, selector, label}` | Survol |
-| `dom.scrollDown` | `{amount}` | Scroll bas |
-| `dom.scrollUp` | `{amount}` | Scroll haut |
+| Handler          | Payload                           | Description                 |
+| ---------------- | --------------------------------- | --------------------------- |
+| `dom.click`      | `{text, selector, label}`         | Click par texte/sélecteur   |
+| `dom.type`       | `{selector, value}`               | Type dans un input          |
+| `dom.fillForm`   | `{fields: { "Label": "valeur" }}` | Remplir plusieurs champs    |
+| `dom.search`     | `{text}`                          | Chercher texte dans la page |
+| `dom.extract`    | `{type}`                          | Extraire contenu structuré  |
+| `dom.hover`      | `{text, selector, label}`         | Survol                      |
+| `dom.scrollDown` | `{amount}`                        | Scroll bas                  |
+| `dom.scrollUp`   | `{amount}`                        | Scroll haut                 |
 
 #### Sessions & Batch
 
-| Handler | Payload | Description |
-|---|---|---|
-| `session.create` | `{sessionId}` | Créer session isolée |
-| `session.list` | `{}` | Lister sessions actives |
-| `script.execute` | `{commands[], stopOnError, returnAllResults}` | Batch de commandes |
-| `browser.status` | `{}` | État du navigateur |
+| Handler          | Payload                                       | Description             |
+| ---------------- | --------------------------------------------- | ----------------------- |
+| `session.create` | `{sessionId}`                                 | Créer session isolée    |
+| `session.list`   | `{}`                                          | Lister sessions actives |
+| `script.execute` | `{commands[], stopOnError, returnAllResults}` | Batch de commandes      |
+| `browser.status` | `{}`                                          | État du navigateur      |
 
 ---
 
@@ -235,6 +243,7 @@ Chaque commande retourne du JSON propre et concis :
 ## Vision Frames
 
 Les frames `vision.frame` incluent :
+
 - **`cssW` / `cssH`** — Dimensions CSS (référence pour les coordonnées `input.*`)
 - **`dpr`** — Device Pixel Ratio
 - **`w` / `h`** — Pixels réels (peut différer sur HiDPI)
@@ -263,25 +272,13 @@ Accessible sur `http://localhost:8080/viewer` :
 
 ## Comparaison avec les solutions existantes
 
-| Acteur | Approche | Précision | Coût/action | Vitesse |
-|---|---|---|---|---|
-| **OpenAI Operator** | Screenshot → x,y | 70-80% | ~2000 tokens | 5-15s |
-| **Anthropic Computer Use** | Screenshot → x,y | 70-80% | ~2000 tokens | 5-15s |
-| **Browser-use** | Playwright + LLM côté serveur | ~85% | Très élevé | 10-30s |
-| **Skyvern** | Agent visuel | ~80% | Élevé | 10-20s |
-| **Ce bridge** | DOM annotate → ref | **99%** | **~200 tokens** | **1-2s** |
-
----
-
-## Hall of Shame — Bugs corrigés ce matin
-
-| Bug | Cause | Fix |
-|---|---|---|
-| `dom.click` plantait avec `.trim()` | Resolver ne gérait pas les entrées `undefined` | Sanitisation string robuste |
-| `human.read` retournait `{ok: true}` | Pas de retour texte | Retourne maintenant le texte complet + URL + titre |
-| `input.*` non reconnus | Handlers pas encore déployés | Activés dans handlers.ts |
-| Navigation détruit le contexte | `page.annotate` juste après `press Enter` | Séparer en batchs ou attendre |
-| Interpolation `${stepX}` | Pas implémentée côté serveur | Faire l'annotate initial, puis utiliser les IDs |
+| Acteur                     | Approche                      | Précision | Coût/action     | Vitesse  |
+| -------------------------- | ----------------------------- | --------- | --------------- | -------- |
+| **OpenAI Operator**        | Screenshot → x,y              | 70-80%    | ~2000 tokens    | 5-15s    |
+| **Anthropic Computer Use** | Screenshot → x,y              | 70-80%    | ~2000 tokens    | 5-15s    |
+| **Browser-use**            | Playwright + LLM côté serveur | ~85%      | Très élevé      | 10-30s   |
+| **Skyvern**                | Agent visuel                  | ~80%      | Élevé           | 10-20s   |
+| **Ce bridge**              | DOM annotate → ref            | **99%**   | **~200 tokens** | **1-2s** |
 
 ---
 
@@ -292,12 +289,14 @@ Accessible sur `http://localhost:8080/viewer` :
 - [x] CLI `bridge.cmd` natif (navigate, annotate, click, type, press, scroll, extract, status, run)
 - [x] `page.annotate` avec numéros verts + liste structurée
 - [x] `agent.click/type/press` par référence
-- [x] `script.execute` pour batchs
-- [x] Sessions persistantes
+- [x] `script.execute` pour batchs avec interpolation `${stepX...}`
+- [x] Sessions persistantes multiples
 - [x] Images statiques sur `/captures/`
 - [x] Viewer interactif sur `/viewer`
 - [x] `input.*` primitives brutes
 - [x] Anti-détection (curseur fluide, délais humains)
+- [x] `wait` handler pour les pauses dans les batchs
+- [x] Self-healing basique (retry sur navigation dans `annotate`)
 
 ### Phase 1 — Self-Healing Sélecteurs (3 jours)
 
@@ -350,7 +349,9 @@ Le bridge maintient un modèle mental persistant de la page avec diff :
   "changeType": "navigation",
   "newElements": 15,
   "removedElements": 8,
-  "changedElements": [{"id": 5, "was": "combobox", "now": "combobox", "value": "monténégro"}]
+  "changedElements": [
+    { "id": 5, "was": "combobox", "now": "combobox", "value": "monténégro" }
+  ]
 }
 ```
 
@@ -394,9 +395,10 @@ L'humain fait une démo, l'agent la rejoue :
 ## Positionnement
 
 **Nom :** OpenClaw Browser Bridge
-**Tagline :** *"Le seul browser agent qui lit le DOM au lieu de deviner sur des screenshots."*
+**Tagline :** _"Le seul browser agent qui lit le DOM au lieu de deviner sur des screenshots."_
 
 **Avantages concurrentiels :**
+
 - **10x plus précis** que les approches screenshot (DOM vs image)
 - **10x moins cher** en tokens (texte structuré vs screenshot)
 - **Human-in-the-loop** — l'humain valide dans le chat
@@ -408,13 +410,13 @@ L'humain fait une démo, l'agent la rejoue :
 
 ## Fichiers importants
 
-| Fichier | Description |
-|---|---|
-| `bridge.cmd` / `bridge.ps1` | CLI natif Windows |
-| `src/cli/bridge.ts` | Code source du CLI |
-| `src/server/server.ts` | Serveur WebSocket + HTTP |
-| `src/browser/handlers.ts` | Handlers de commandes |
-| `src/browser/agent.ts` | Moteur d'annotation |
-| `src/browser/controller.ts` | Contrôleur Playwright + sessions |
-| `SPEC-GAME-CHANGER.md` | Specs détaillées des features avancées |
-| `README.md` | Documentation technique |
+| Fichier                     | Description                            |
+| --------------------------- | -------------------------------------- |
+| `bridge.cmd` / `bridge.ps1` | CLI natif Windows                      |
+| `src/cli/bridge.ts`         | Code source du CLI                     |
+| `src/server/server.ts`      | Serveur WebSocket + HTTP               |
+| `src/browser/handlers.ts`   | Handlers de commandes                  |
+| `src/browser/agent.ts`      | Moteur d'annotation                    |
+| `src/browser/controller.ts` | Contrôleur Playwright + sessions       |
+| `SPEC-GAME-CHANGER.md`      | Specs détaillées des features avancées |
+| `README.md`                 | Documentation technique                |
