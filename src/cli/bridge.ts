@@ -52,7 +52,7 @@ function mapCommand(type: string, pParts: string[]): any {
         if (pParts[1] === 'url') return { type: 'agent.waitFor', payload: { url: pParts.slice(2).join(' ') } };
       }
       return { type: 'wait', payload: { ms: Number(pParts[0]) || 1000 } };
-    case 'annotate': return { type: 'page.annotate', payload: {} };
+    case 'annotate': return { type: 'page.annotate', payload: { noImage: pParts.includes('--no-image') } };
     case 'extract': return { type: 'dom.extract', payload: { type: pParts[0]?.startsWith('--type') ? pParts[0].split('=')[1] : pParts[1] } };
     case 'status': return { type: 'browser.status', payload: {} };
     case 'screenshot': return { type: 'screenshot', payload: {} };

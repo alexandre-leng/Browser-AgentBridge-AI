@@ -41,7 +41,7 @@ export function specialHandlers(ctx: HandlerContext): Record<string, Handler> {
         stopOnError: { type: 'boolean' },
         returnAllResults: { type: 'boolean' },
       }, 'script.execute');
-      const { commands, stopOnError = true, returnAllResults = false } = payload;
+      const { commands, stopOnError = true, returnAllResults = true } = payload;
       if (!ctx.dispatch) throw new Error('dispatch not available');
       const allResults = [];
       let finalResult = null;

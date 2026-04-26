@@ -25,9 +25,10 @@ export function agentHandlers(ctx: HandlerContext): Record<string, Handler> {
   };
 
   return {
-    'page.annotate': async () => {
+    'page.annotate': async (payload: any = {}) => {
       let page = await ctx.p();
       let retries = 3;
+      const noImage = payload?.noImage ?? false;
       while (retries > 0) {
         try {
           await page.waitForLoadState('domcontentloaded').catch(() => {});
@@ -42,7 +43,13 @@ export function agentHandlers(ctx: HandlerContext): Record<string, Handler> {
           await writeFile(path, Buffer.from(imageB64, 'base64'));
           const port = process.env.PORT ?? 8080;
           const imageUrl = `http://localhost:${port}/captures/${filename}`;
-          return { image: imageB64, imageUrl, elements, url: page.url(), title: await page.title() };
+          return { 
+            ...(noImage ? {} : { image: imageB64 }), 
+            imageUrl, 
+            elements, 
+            url: page.url(), 
+            title: await page.title() 
+          };
         } catch (e: any) {
           if (e.message.includes('Execution context was destroyed') || e.message.includes('Target closed') || e.message.includes('Navigating')) {
             retries--;
