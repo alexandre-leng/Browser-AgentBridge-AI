@@ -1,10 +1,25 @@
 import type { HandlerContext, Handler } from './types.js';
 import { extractFrenchPhones } from './phone.js';
+import { buildJsonSchemaPrompt, extractWithSchema } from '../schemaExtract.js';
+import { assertNoAntiBot, assertUsefulPage } from '../polite.js';
 
 export function extractionHandlers(ctx: HandlerContext): Record<string, Handler> {
   return {
-    'dom.extract': async ({ type }: any = {}) => {
+    'dom.extract': async ({ type, schema, llm = false }: any = {}) => {
       const page = await ctx.p();
+      await assertNoAntiBot(page);
+      await assertUsefulPage(page, 'dom.extract');
+      if (schema) {
+        if (llm) {
+          return {
+            type: 'schema-llm-prompt',
+            prompt: buildJsonSchemaPrompt(schema, await page.evaluate(() => document.body.innerText)),
+            note: 'Send this prompt to an LLM client and parse the JSON response. OpenClaw does not call external LLMs from the bridge process.',
+          };
+        }
+        const extracted = await extractWithSchema(page, schema) as { data: unknown; missing: string[] };
+        return { type: 'schema', ...extracted };
+      }
       if (type === 'search-results') {
         const results = await page.evaluate(() => {
           return Array.from(document.querySelectorAll('h3')).map(h => ({

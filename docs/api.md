@@ -1,5 +1,7 @@
 # Browser Bridge — API Reference
 
+Version documentée : `3.2.0`.
+
 Commandes JSON-RPC exposées via WebSocket sur `/ws/browser-bridge`.
 
 Format de requête :
@@ -8,13 +10,20 @@ Format de requête :
 { "id": "<id>", "type": "<command>", "payload": { ... } }
 ```
 
-**Total : 60 commandes**
+**Total : 63 commandes**
 
 ## Authentification
 
-- `BRIDGE_TOKEN` : si défini, header `Authorization: Bearer <token>` (ou `?token=`) requis
+- `BRIDGE_TOKEN` : header `Authorization: Bearer <token>` (ou `?token=`). Obligatoire si `BRIDGE_HOST` n'est pas local.
 - `BRIDGE_ALLOWED_ORIGINS` : CSV d'origines autorisées (rejet sinon)
-- `BRIDGE_ADMIN_TOKEN` : requis pour `exec.script`, doit être fourni dans le payload (`adminToken`)
+- `BRIDGE_ALLOW_EXEC_SCRIPT=1` + `BRIDGE_ADMIN_TOKEN` : requis pour `exec.script`, token à fournir dans le payload (`adminToken`)
+- `BRIDGE_ALLOW_FILE_URLS=1` + `BRIDGE_ALLOWED_FILE_ROOTS` : requis pour naviguer vers `file:`.
+
+## MCP
+
+Serveur MCP officiel via stdio : `npm run mcp` ou `openclaw-mcp` après build.
+
+Outils MCP principaux : `browser_status`, `navigate`, `annotate_page`, `click_ref`, `type_ref`, `extract_schema`. Outil bas niveau `browser_command` activable via `BRIDGE_MCP_ALLOW_RAW=1`.
 
 ## Commandes par catégorie
 
@@ -113,6 +122,12 @@ Format de requête :
 - `tab.new`
 - `tab.switch`
 
+### `trace`
+
+- `trace.artifacts`
+- `trace.list`
+- `trace.save`
+
 ### `viewport`
 
 - `viewport.set`
@@ -129,8 +144,13 @@ Format de requête :
 |---|---|---|
 | `PORT` | port HTTP/WS | 8080 |
 | `BRIDGE_HOST` | host de bind | 127.0.0.1 |
-| `BRIDGE_TOKEN` | token d'auth WS | (vide = désactivé) |
+| `BRIDGE_TOKEN` | token d'auth WS, obligatoire hors localhost | (vide autorisé localement) |
 | `BRIDGE_ADMIN_TOKEN` | token pour `exec.script` | (vide = commande désactivée) |
+| `BRIDGE_ALLOW_EXEC_SCRIPT` | active `exec.script` si `1` | 0 |
+| `BRIDGE_ALLOW_FILE_URLS` | active navigation `file:` si `1` | 0 |
+| `BRIDGE_ALLOWED_FILE_ROOTS` | CSV de racines autorisées pour `file:` | (vide) |
+| `BRIDGE_POLITE_MODE` | ralentissement par domaine + détection anti-bot (`0` désactive) | 1 |
+| `BRIDGE_POLITE_MIN_DELAY_MS` | délai minimum entre navigations vers le même host | 12000 |
 | `BRIDGE_ALLOWED_ORIGINS` | CSV origines autorisées | (vide = toutes) |
 | `BRIDGE_DEFAULT_TIMEOUT_MS` | timeout défaut Playwright | 15000 |
 | `BRIDGE_DEFAULT_NAV_TIMEOUT_MS` | timeout nav défaut | 20000 |

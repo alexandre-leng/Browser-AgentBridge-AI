@@ -81,10 +81,19 @@ export function findSimilar(query: string, sessionId: string = 'default', limit 
 
 const INTERACTIVE_SEL = [
   'a[href]',
+  'a:not([href])',
   'button:not([disabled])',
   'input:not([type="hidden"]):not([disabled])',
   'select:not([disabled])',
   'textarea:not([disabled])',
+  '[onclick]',
+  '[jsaction]',
+  '[data-href]',
+  '[data-url]',
+  '[data-link]',
+  '[data-testid*="link" i]',
+  '[data-testid*="card" i]',
+  '[data-testid*="listing" i]',
   '[role="button"]',
   '[role="link"]',
   '[role="checkbox"]',
@@ -104,12 +113,57 @@ async function collectElementsRecursive(frame: Frame, offset = { x: 0, y: 0 }, c
   const elements = await frame.evaluate(({ sel, offset }) => {
     const seen = new Set<string>();
     const result: any[] = [];
-    
-    for (const el of Array.from(document.querySelectorAll(sel))) {
+
+    const isDisabled = (el: Element) =>
+      el.hasAttribute('disabled') ||
+      el.getAttribute('aria-disabled') === 'true' ||
+      (el as HTMLInputElement).disabled === true;
+
+    const hasClickHandler = (el: Element) => {
+      const h = el as HTMLElement & { onclick?: unknown };
+      const attrs = el.getAttributeNames();
+      return (
+        typeof h.onclick === 'function' ||
+        attrs.some((attr) => attr.startsWith('on') || attr === 'jsaction') ||
+        ['data-href', 'data-url', 'data-link', 'data-action', 'data-testid'].some((attr) => el.hasAttribute(attr))
+      );
+    };
+
+    const looksLikeVisibleLink = (el: Element, style: CSSStyleDeclaration) => {
+      const h = el as HTMLElement;
+      const text = h.innerText?.trim() || h.getAttribute('aria-label') || h.getAttribute('title') || '';
+      const role = h.getAttribute('role');
+      const tag = el.tagName.toLowerCase();
+      const tabIndex = h.tabIndex;
+      const hasNavigationData = ['href', 'data-href', 'data-url', 'data-link'].some((attr) => el.hasAttribute(attr));
+      const pointer = style.cursor === 'pointer';
+      const classSignal = /link|card|tile|item|listing|result|click|nav/i.test(String(h.className || ''));
+      const idSignal = /link|card|tile|item|listing|result|click|nav/i.test(h.id || '');
+      return (
+        tag === 'a' ||
+        role === 'link' ||
+        role === 'button' ||
+        hasNavigationData ||
+        hasClickHandler(el) ||
+        (pointer && (text.length > 0 || tabIndex >= 0 || classSignal || idSignal))
+      );
+    };
+
+    const directMatches = Array.from(document.querySelectorAll(sel));
+    const visualMatches = Array.from(document.querySelectorAll('body *')).filter((el) => {
+      if (directMatches.includes(el)) return false;
+      if (isDisabled(el)) return false;
+      const style = window.getComputedStyle(el);
+      if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+      return looksLikeVisibleLink(el, style);
+    });
+
+    for (const el of [...directMatches, ...visualMatches]) {
       // Skip invisible or off-screen
       const style = window.getComputedStyle(el);
       if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') continue;
       if (el.getAttribute('aria-hidden') === 'true') continue;
+      if (isDisabled(el)) continue;
       
       const r = el.getBoundingClientRect();
       if (r.width < 4 || r.height < 4) continue;
@@ -132,7 +186,7 @@ async function collectElementsRecursive(frame: Frame, offset = { x: 0, y: 0 }, c
         el.getAttribute('id') ||
         '';
       const tag = el.tagName.toLowerCase();
-      const role = h.getAttribute('role') || tag;
+      const role = h.getAttribute('role') || (looksLikeVisibleLink(el, style) && !['button', 'input', 'select', 'textarea'].includes(tag) ? 'link' : tag);
       
       result.push({
         role,

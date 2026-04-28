@@ -11,6 +11,7 @@ export interface LaunchOpts {
   cdpUrl?: string;
   profileDir?: string;
   maximized?: boolean;
+  slowMo?: number;
 }
 
 export const sessionStore = new AsyncLocalStorage<string | undefined>();
@@ -42,6 +43,9 @@ export class BrowserController {
     const profileDir = opts.profileDir ?? process.env.CHROME_PROFILE;
     const channel = opts.channel ?? (process.env.CHROME_CHANNEL as LaunchOpts['channel']) ?? 'chrome';
     const maximized = opts.maximized ?? true;
+    const envSlowMo = Number(process.env.BRIDGE_PLAYWRIGHT_SLOWMO_MS ?? 0);
+    const slowMo = opts.slowMo ?? (Number.isFinite(envSlowMo) ? envSlowMo : 0);
+    const bringToFront = process.env.BRIDGE_BRING_TO_FRONT !== '0';
     const args = [
       '--disable-blink-features=AutomationControlled',
       '--disable-features=IsolateOrigins',
@@ -65,6 +69,7 @@ export class BrowserController {
         headless: opts.headless ?? false,
         channel,
         args,
+        slowMo,
       });
     }
 
@@ -76,6 +81,7 @@ export class BrowserController {
         headless: opts.headless ?? false,
         channel,
         args,
+        slowMo,
         ...contextOpts,
       });
     } else {
@@ -124,7 +130,7 @@ export class BrowserController {
       });
     }
     
-    try { await page.bringToFront(); } catch {}
+    if (bringToFront) try { await page.bringToFront(); } catch {}
 
     if (isDefault) {
       this.defaultContext = ctx;
@@ -145,7 +151,7 @@ export class BrowserController {
         this.defaultPage = pages[0] ?? (await this.defaultContext!.newPage());
         p = this.defaultPage;
       }
-      try { await p.bringToFront(); } catch {}
+      if (process.env.BRIDGE_BRING_TO_FRONT !== '0') try { await p.bringToFront(); } catch {}
       return p;
     } else {
       if (!this.contexts.has(sessionId)) await this.launch({}, sessionId);
@@ -156,7 +162,7 @@ export class BrowserController {
         p = pages[0] ?? (await ctx!.newPage());
         this.pages.set(sessionId, p);
       }
-      try { await p.bringToFront(); } catch {}
+      if (process.env.BRIDGE_BRING_TO_FRONT !== '0') try { await p.bringToFront(); } catch {}
       return p;
     }
   }

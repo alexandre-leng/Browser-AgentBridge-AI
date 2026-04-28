@@ -1,9 +1,13 @@
 import type { Page } from 'playwright';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { HandlerContext, Handler } from './types.js';
 import { humanMove, humanScroll, humanPause, sleep, randInt } from '../human.js';
 import { SEARCH_URLS } from './navigation.js';
 import { validate } from './validate.js';
 import { extractFrenchPhones } from './phone.js';
+import { assertExecAllowed } from '../security.js';
+import { politeGoto, assertNoAntiBot } from '../polite.js';
 
 const COOKIE_SELECTORS = [
   '#L2AGLb', // Google
@@ -100,9 +104,7 @@ export function specialHandlers(ctx: HandlerContext): Record<string, Handler> {
     },
 
     'exec.script': async ({ code, adminToken }: any) => {
-      const expected = process.env.BRIDGE_ADMIN_TOKEN;
-      if (!expected) throw new Error('exec.script disabled: set BRIDGE_ADMIN_TOKEN to enable');
-      if (adminToken !== expected) throw new Error('exec.script: invalid admin token');
+      assertExecAllowed(adminToken);
       if (typeof code !== 'string') throw new Error('exec.script: code must be a string');
       const page = await ctx.p();
       const result = await page.evaluate((c: string) => {
@@ -115,7 +117,7 @@ export function specialHandlers(ctx: HandlerContext): Record<string, Handler> {
     // --- Combos ---
     'combo.searchAndClick': async ({ query, engine = 'google' }) => {
       const page = await ctx.p();
-      await page.goto(SEARCH_URLS[engine](query), { waitUntil: 'domcontentloaded' });
+      await politeGoto(page, SEARCH_URLS[engine](query), { waitUntil: 'domcontentloaded' });
       await humanPause(600, 1200);
       const firstResult = page.locator('a h3').first();
       await firstResult.waitFor({ state: 'visible', timeout: 8000 });
@@ -130,7 +132,7 @@ export function specialHandlers(ctx: HandlerContext): Record<string, Handler> {
 
     'agent.search': async ({ query, engine = 'google' }: any) => {
       const page = await ctx.p();
-      await page.goto(SEARCH_URLS[engine](query), { waitUntil: 'domcontentloaded' });
+      await politeGoto(page, SEARCH_URLS[engine](query), { waitUntil: 'domcontentloaded' });
       await humanPause(1000, 2000);
       const results = await page.evaluate(() => {
         return Array.from(document.querySelectorAll('h3')).map(h => ({
@@ -146,7 +148,8 @@ export function specialHandlers(ctx: HandlerContext): Record<string, Handler> {
       const page = await ctx.p();
       
       // 1. Navigation
-      await page.goto(SEARCH_URLS[engine](goal), { waitUntil: 'domcontentloaded' });
+      await politeGoto(page, SEARCH_URLS[engine](goal), { waitUntil: 'domcontentloaded' });
+      await assertNoAntiBot(page);
       
       // 2. Auto-cookie
       const cookiesAccepted = await autoAcceptCookies(page);
@@ -198,12 +201,14 @@ export function specialHandlers(ctx: HandlerContext): Record<string, Handler> {
         title: await page.title()
       };
     },
-    'human.explore': async ({ steps = 3 }: any = {}) => {
+    'human.explore': async ({ steps = 3, scroll = false }: any = {}) => {
       const page = await ctx.p();
       for (let i = 0; i < steps; i++) {
         const vp = page.viewportSize() ?? { width: 1280, height: 800 };
         await humanMove(page, randInt(50, vp.width - 50), randInt(50, vp.height - 50));
+        if (scroll && i % 2 === 1) await humanScroll(page, randInt(180, 420));
         await humanPause(300, 900);
+        await assertNoAntiBot(page);
       }
       return { ok: true };
     },
@@ -220,10 +225,21 @@ export function specialHandlers(ctx: HandlerContext): Record<string, Handler> {
       vision.stop();
       return { ok: true };
     },
-    'vision.screenshot': async () => {
+    'vision.screenshot': async ({ fullPage = false, quality = 70, save = true }: any = {}) => {
       const page = await ctx.p();
-      const buf = await page.screenshot({ type: 'jpeg', quality: 70 });
-      return { image: buf.toString('base64') };
+      const buf = await page.screenshot({ type: 'jpeg', quality, fullPage });
+      const result: any = { image: buf.toString('base64'), url: page.url(), title: await page.title() };
+      if (save) {
+        const dir = join(process.cwd(), 'logs', 'screenshots');
+        await mkdir(dir, { recursive: true });
+        const ts = new Date().toISOString().replace(/[:.]/g, '-');
+        const filename = `screenshot-${ts}.jpg`;
+        await writeFile(join(dir, filename), buf);
+        const port = process.env.PORT ?? 8080;
+        result.imageUrl = `http://localhost:${port}/captures/${filename}`;
+        result.path = join(dir, filename);
+      }
+      return result;
     },
   };
 }

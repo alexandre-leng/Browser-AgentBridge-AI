@@ -32,9 +32,10 @@ async function connect() {
 }
 
 function print(result) {
-  if (result && result.imageBase64) {
+  if (result && (result.imageBase64 || result.image)) {
     const out = { ...result };
     delete out.imageBase64;
+    delete out.image;
     console.log(JSON.stringify(out, null, 2));
   } else {
     console.log(JSON.stringify(result, null, 2));
@@ -83,6 +84,18 @@ const commands = {
     print(r);
   },
 
+  async discover(ws, args) {
+    const steps = parseInt(args[0]) || 5;
+    const amount = parseInt(args[1]) || 650;
+    const r = await send(ws, { id: 'dsc', type: 'agent.discoverScroll', payload: { steps, amount } });
+    print(r);
+  },
+
+  async screenshot(ws, args) {
+    const r = await send(ws, { id: 'shot', type: 'vision.screenshot', payload: { fullPage: args.includes('--full-page') } });
+    print(r);
+  },
+
   async extract(ws, args) {
     const type = args[0] || 'article';
     const r = await send(ws, { id: 'ext', type: 'dom.extract', payload: { type } });
@@ -127,6 +140,8 @@ Commands:
   type <ref> <text>       Type text into element
   press <key>             Press Enter, Tab, Escape
   scroll [dir] [amount]   Scroll down/up (default: down 300)
+  discover [steps] [px]    Slowly scroll and capture page states
+  screenshot [--full-page] Capture and save a screenshot
   extract [type]          Extract structured data (article|table|form)
   summary                 Page summary (URL, title, elements)
   wait [ms]               Wait milliseconds (default: 2000)

@@ -55,18 +55,7 @@ export function validate(payload: unknown, schema: Schema, cmd: string): void {
   }
 }
 
-const SAFE_URL_PROTOCOLS = new Set(['http:', 'https:', 'about:', 'file:']);
-
 export function validateUrl(raw: unknown, cmd = 'navigate'): string {
-  if (typeof raw !== 'string' || !raw) throw new Error(`${cmd}: url must be a non-empty string`);
-  let url: URL;
-  try {
-    url = new URL(raw);
-  } catch {
-    throw new Error(`${cmd}: invalid url '${raw}'`);
-  }
-  if (!SAFE_URL_PROTOCOLS.has(url.protocol)) {
-    throw new Error(`${cmd}: protocol '${url.protocol}' not allowed`);
-  }
-  return url.toString();
+  return validateNavigableUrl(raw, cmd);
 }
+import { validateNavigableUrl } from '../security.js';

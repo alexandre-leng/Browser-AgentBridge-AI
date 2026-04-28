@@ -1,7 +1,8 @@
 import type { Page } from 'playwright';
 import type { HandlerContext, Handler } from './types.js';
 import { resolve, resolveVisible } from '../resolver.js';
-import { humanMove, humanType, humanScroll, humanPause, sleep, rand, randInt } from '../human.js';
+import { flashClick, humanMove, humanType, humanScroll, humanPause, sleep, rand, randInt } from '../human.js';
+import { assertNoAntiBot } from '../polite.js';
 
 async function centerOf(page: Page, query: string) {
   const loc = await resolveVisible(page, query);
@@ -19,6 +20,8 @@ export function domHandlers(ctx: HandlerContext): Record<string, Handler> {
       await humanMove(page, x, y);
       await sleep(rand(50, 150));
       await page.mouse.click(x, y, { delay: randInt(40, 120) });
+      await flashClick(page, x, y);
+      await assertNoAntiBot(page);
       return { clicked: q, x, y };
     },
 
@@ -27,6 +30,8 @@ export function domHandlers(ctx: HandlerContext): Record<string, Handler> {
       const { x, y } = await centerOf(page, query ?? selector ?? text);
       await humanMove(page, x, y);
       await page.mouse.dblclick(x, y);
+      await flashClick(page, x, y);
+      await assertNoAntiBot(page);
       return { ok: true };
     },
 
@@ -44,6 +49,8 @@ export function domHandlers(ctx: HandlerContext): Record<string, Handler> {
       if (q) {
         const loc = await resolveVisible(page, q);
         await loc.click();
+        const box = await loc.boundingBox().catch(() => null);
+        if (box) await flashClick(page, box.x + box.width / 2, box.y + box.height / 2);
         await humanPause(100, 300);
       }
       await humanType(page, val);
@@ -127,10 +134,12 @@ export function domHandlers(ctx: HandlerContext): Record<string, Handler> {
 
     'dom.scrollDown': async ({ amount = 500 }: any = {}) => {
       await humanScroll(await ctx.p(), amount);
+      await assertNoAntiBot(await ctx.p());
       return { ok: true };
     },
     'dom.scrollUp': async ({ amount = 500 }: any = {}) => {
       await humanScroll(await ctx.p(), -amount);
+      await assertNoAntiBot(await ctx.p());
       return { ok: true };
     },
 

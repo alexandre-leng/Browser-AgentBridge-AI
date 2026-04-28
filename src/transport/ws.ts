@@ -5,6 +5,10 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { buildHandlers } from '../browser/handlers/index.js';
 import { sessionStore, controller } from '../browser/controller.js';
 import { log } from '../logger.js';
+import { isLocalHost, requireBridgeToken, securityFromEnv } from '../browser/security.js';
+import { scrubPayload } from '../browser/scrub.js';
+import { traces } from '../browser/traces.js';
+import { VERSION } from '../version.js';
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -23,9 +27,10 @@ const SECURITY_HEADERS: Record<string, string> = {
 
 const VIEWER_CSP = "default-src 'self'; img-src 'self' data: blob:; connect-src 'self' ws: wss:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'";
 
-const BRIDGE_TOKEN = process.env.BRIDGE_TOKEN ?? '';
-const BIND_HOST = process.env.BRIDGE_HOST ?? '127.0.0.1';
-const ALLOWED_ORIGINS = (process.env.BRIDGE_ALLOWED_ORIGINS ?? '').split(',').map(s => s.trim()).filter(Boolean);
+const SECURITY = securityFromEnv();
+const BRIDGE_TOKEN = requireBridgeToken(SECURITY);
+const BIND_HOST = SECURITY.bindHost;
+const ALLOWED_ORIGINS = SECURITY.allowedOrigins;
 
 function serveFile(baseDir: string, rawFile: string, res: ServerResponse): Promise<void> {
   return (async () => {
@@ -127,11 +132,15 @@ export function startServer(port = 8080) {
       }
       if (BRIDGE_TOKEN) {
         const auth = info.req.headers['authorization'] ?? '';
-        const urlStr = info.req.url ?? '';
-        const qTokenMatch = urlStr.match(/[?&]token=([^&]+)/);
-        const qToken = qTokenMatch ? decodeURIComponent(qTokenMatch[1]) : '';
         const bearer = typeof auth === 'string' && auth.startsWith('Bearer ') ? auth.slice(7) : '';
-        if (bearer !== BRIDGE_TOKEN && qToken !== BRIDGE_TOKEN) {
+        let ok = bearer === BRIDGE_TOKEN;
+        if (!ok && isLocalHost(BIND_HOST)) {
+          const urlStr = info.req.url ?? '';
+          const qTokenMatch = urlStr.match(/[?&]token=([^&]+)/);
+          const qToken = qTokenMatch ? decodeURIComponent(qTokenMatch[1]) : '';
+          ok = qToken === BRIDGE_TOKEN;
+        }
+        if (!ok) {
           log('warn', 'ws rejected: token', {});
           return done(false, 401, 'unauthorized');
         }
@@ -184,16 +193,20 @@ export function startServer(port = 8080) {
           return await handler(payloadObj);
         });
         const durationMs = Date.now() - t0;
+        const safePayload = scrubPayload(payloadObj, type);
+        traces.record({ sessionId, command: type, ok: true, durationMs, payload: safePayload, result });
         log('info', 'cmd ok', { sessionId, cmd: type, ok: true, durationMs });
         ws.send(JSON.stringify({ id, type, ok: true, result }));
       } catch (err) {
         const durationMs = Date.now() - t0;
         const { message, code } = scrubError(err);
+        const safePayload = scrubPayload(payload, type);
+        traces.record({ sessionId, command: type, ok: false, durationMs, payload: safePayload, error: message });
         log('error', 'cmd err', { sessionId, cmd: type, ok: false, durationMs, errorCode: code, error: message });
         ws.send(JSON.stringify({ id, type, ok: false, error: message, code }));
       }
     });
-    ws.send(JSON.stringify({ type: 'hello', payload: { version: '3.0.0' } }));
+    ws.send(JSON.stringify({ type: 'hello', payload: { version: VERSION } }));
   });
   const unsubscribe = controller.onEvent((evt) => broadcast(evt));
 

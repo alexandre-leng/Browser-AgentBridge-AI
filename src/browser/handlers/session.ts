@@ -3,6 +3,8 @@ import { join } from 'node:path';
 import type { HandlerContext, Handler } from './types.js';
 import { controller, sessionStore } from '../controller.js';
 import { validateUrl } from './validate.js';
+import { traces } from '../traces.js';
+import { politeGoto } from '../polite.js';
 
 interface IncomingCookie {
   name: string;
@@ -61,6 +63,15 @@ export function sessionHandlers(ctx: HandlerContext): Record<string, Handler> {
       await controller.close(sessionStore.getStore());
       return { ok: true };
     },
+    'trace.list': async ({ sessionId }: any = {}) => {
+      return { sessionId: sessionId ?? sessionStore.getStore() ?? 'default', events: traces.list(sessionId ?? sessionStore.getStore() ?? 'default') };
+    },
+    'trace.save': async ({ sessionId }: any = {}) => {
+      return await traces.save(sessionId ?? sessionStore.getStore() ?? 'default');
+    },
+    'trace.artifacts': async () => {
+      return { artifacts: await traces.artifacts() };
+    },
     'screenshot': async ({ format = 'png', fullPage = false }: any = {}) => {
       const ext = format === 'jpg' || format === 'jpeg' ? 'jpg' : 'png';
       const page = await ctx.p();
@@ -108,7 +119,7 @@ export function sessionHandlers(ctx: HandlerContext): Record<string, Handler> {
       const safeUrl = url ? validateUrl(url, 'tab.new') : undefined;
       const pg = await controller.ctx(sessionStore.getStore()).newPage();
       controller.setActivePage(pg, sessionStore.getStore());
-      if (safeUrl) await pg.goto(safeUrl);
+      if (safeUrl) await politeGoto(pg, safeUrl);
       return { url: pg.url() };
     },
     ping: async () => ({ pong: Date.now() }),

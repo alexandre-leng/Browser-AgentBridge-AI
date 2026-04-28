@@ -1,24 +1,30 @@
 {
   "name": "openclaw-browser-bridge",
-  "version": "3.0.0",
+  "version": "3.2.0",
   "description": "Pont de contrôle navigateur humain basé sur Playwright",
   "type": "module",
   "bin": {
-    "openclaw-live": "./dist/cli/live.js"
+    "openclaw-live": "./dist/cli/live.js",
+    "openclaw-mcp": "./dist/mcp.js"
   },
   "scripts": {
     "start": "tsx src/server.ts",
     "live": "tsx src/cli/live.ts",
+    "mcp": "tsx src/mcp.ts",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
-    "docs:api": "tsx scripts/gen-api-docs.ts"
+    "docs:api": "tsx scripts/gen-api-docs.ts",
+    "benchmark": "tsx scripts/benchmark.ts",
+    "test:site": "tsx scripts/test-site-openclaw.ts"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "libphonenumber-js": "^1.12.42",
     "playwright": "^1.59.1",
-    "ws": "^8.16.0"
+    "ws": "^8.16.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

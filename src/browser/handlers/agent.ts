@@ -3,8 +3,9 @@ import { join } from 'node:path';
 import type { HandlerContext, Handler } from './types.js';
 import { sessionStore } from '../controller.js';
 import { resolveVisible } from '../resolver.js';
-import { humanMove, humanType, humanPause, sleep, rand, randInt } from '../human.js';
+import { flashClick, humanMove, humanType, humanPause, sleep, rand, randInt } from '../human.js';
 import { annotateInteractive, accessibilityTree, findByRef, findSimilar, getAgentElements, type AgentElement } from '../agent.js';
+import { assertNoAntiBot, assertUsefulPage } from '../polite.js';
 
 export function agentHandlers(ctx: HandlerContext): Record<string, Handler> {
   const getEl = async (ref: any, retry = true): Promise<AgentElement> => {
@@ -32,6 +33,8 @@ export function agentHandlers(ctx: HandlerContext): Record<string, Handler> {
       while (retries > 0) {
         try {
           await page.waitForLoadState('domcontentloaded').catch(() => {});
+          await assertNoAntiBot(page);
+          await assertUsefulPage(page, 'page.annotate');
           const sessionId = sessionStore.getStore();
           const { elements, imageB64 } = await annotateInteractive(page, sessionId);
           const dir = join(process.cwd(), 'logs', 'screenshots');
@@ -100,6 +103,8 @@ export function agentHandlers(ctx: HandlerContext): Record<string, Handler> {
           } else {
             await page.mouse.click(x, y, { delay: randInt(40, 110) });
           }
+          await flashClick(page, x, y);
+          await assertNoAntiBot(page);
           return { clicked: el.name || el.role, ref, x, y, attempts: attempt };
         } catch (err) {
           lastErr = err as Error;
@@ -123,6 +128,7 @@ export function agentHandlers(ctx: HandlerContext): Record<string, Handler> {
       const y = el.box.y + Math.round(el.box.h / 2);
       await humanMove(page, x, y);
       await page.mouse.click(x, y, { delay: randInt(30, 80) });
+      await flashClick(page, x, y);
       await humanPause(80, 200);
       if (clearFirst) {
         await page.keyboard.press('Control+a');
@@ -142,7 +148,9 @@ export function agentHandlers(ctx: HandlerContext): Record<string, Handler> {
         if (el) {
           const x = el.box.x + Math.round(el.box.w / 2);
           const y = el.box.y + Math.round(el.box.h / 2);
+          await humanMove(page, x, y);
           await page.mouse.click(x, y);
+          await flashClick(page, x, y);
           await sleep(rand(30, 80));
         }
       }
@@ -175,7 +183,37 @@ export function agentHandlers(ctx: HandlerContext): Record<string, Handler> {
       if (typeof x === 'number' && typeof y === 'number') await humanMove(page, x, y);
       const { humanScroll } = await import('../human.js');
       await humanScroll(page, dy, dx);
+      await assertNoAntiBot(page);
       return { ok: true };
+    },
+
+    'agent.discoverScroll': async ({ direction = 'down', amount = 650, steps = 5, annotate = true }: any = {}) => {
+      const page = await ctx.p();
+      const { humanScroll } = await import('../human.js');
+      const captures = [];
+      const safeSteps = Math.max(1, Math.min(Number(steps) || 5, 20));
+      const delta = direction === 'up' ? -Math.abs(amount) : Math.abs(amount);
+      for (let i = 0; i < safeSteps; i++) {
+        await humanScroll(page, delta);
+        await sleep(rand(450, 1100));
+        await assertNoAntiBot(page);
+        if (annotate && ctx.dispatch) {
+          const ann = await ctx.dispatch('page.annotate', { noImage: true });
+          captures.push({
+            step: i + 1,
+            url: ann.url,
+            title: ann.title,
+            imageUrl: ann.imageUrl,
+            elements: ann.elements?.length ?? 0,
+          });
+        }
+        const atEnd = await page.evaluate(() => {
+          const root = document.scrollingElement || document.documentElement;
+          return root.scrollTop + window.innerHeight >= root.scrollHeight - 8;
+        }).catch(() => false);
+        if (atEnd && direction === 'down') break;
+      }
+      return { ok: true, steps: captures.length || safeSteps, captures };
     },
 
     'agent.waitFor': async ({ text, url, timeout = 12000 }: any) => {

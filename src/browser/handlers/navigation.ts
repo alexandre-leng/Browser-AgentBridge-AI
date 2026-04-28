@@ -1,5 +1,6 @@
 import type { HandlerContext, Handler } from './types.js';
 import { validate, validateUrl } from './validate.js';
+import { politeGoto } from '../polite.js';
 
 const ENGINES = ['google', 'bing', 'duckduckgo'] as const;
 
@@ -19,8 +20,8 @@ export function navigationHandlers(ctx: HandlerContext): Record<string, Handler>
       }, 'navigate');
       const url = validateUrl(payload.url, 'navigate');
       const page = await ctx.p();
-      await page.goto(url, { waitUntil: payload.waitUntil ?? 'domcontentloaded' });
-      const result: any = { url: page.url(), title: await page.title() };
+      const polite = await politeGoto(page, url, { waitUntil: payload.waitUntil ?? 'domcontentloaded' });
+      const result: any = { url: page.url(), title: await page.title(), polite };
       if (payload.autoAnnotate && ctx.dispatch) {
         const ann = await ctx.dispatch('page.annotate', {});
         Object.assign(result, ann);
@@ -37,14 +38,14 @@ export function navigationHandlers(ctx: HandlerContext): Record<string, Handler>
       const page = await ctx.p();
       const url = SEARCH_URLS[engine]?.(payload.query);
       if (!url) throw new Error(`unknown engine: ${engine}`);
-      await page.goto(url, { waitUntil: 'domcontentloaded' });
+      await politeGoto(page, url, { waitUntil: 'domcontentloaded' });
       return { url: page.url(), title: await page.title() };
     },
 
     'dom.goto': async (payload: any) => {
       validate(payload, { url: { type: 'string', required: true } }, 'dom.goto');
       const url = validateUrl(payload.url, 'dom.goto');
-      await (await ctx.p()).goto(url);
+      await politeGoto(await ctx.p(), url);
       return { ok: true };
     },
   };

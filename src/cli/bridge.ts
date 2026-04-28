@@ -55,8 +55,9 @@ function mapCommand(type: string, pParts: string[]): any {
     case 'annotate': return { type: 'page.annotate', payload: { noImage: pParts.includes('--no-image') } };
     case 'extract': return { type: 'dom.extract', payload: { type: pParts[0]?.startsWith('--type') ? pParts[0].split('=')[1] : pParts[1] } };
     case 'status': return { type: 'browser.status', payload: {} };
-    case 'screenshot': return { type: 'screenshot', payload: {} };
-    case 'scroll': return { type: 'dom.scroll', payload: { y: Number(pParts[0]) } };
+    case 'screenshot': return { type: 'vision.screenshot', payload: { fullPage: pParts.includes('--full-page') } };
+    case 'scroll': return { type: 'agent.scroll', payload: { direction: Number(pParts[0]) < 0 ? 'up' : 'down', amount: Math.abs(Number(pParts[0]) || 600) } };
+    case 'discover': return { type: 'agent.discoverScroll', payload: { steps: Number(pParts[0]) || 5, amount: Number(pParts[1]) || 650 } };
     case 'summary': return { type: 'agent.summary', payload: {} };
     case 'run':
       return {
@@ -157,6 +158,7 @@ async function main() {
       }
       
       delete out.imageB64;
+      delete out.image;
       console.log(JSON.stringify(out, null, flags.quiet ? 0 : 2));
       ws.close();
       process.exit(0);
