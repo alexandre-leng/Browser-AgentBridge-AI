@@ -4,11 +4,43 @@ export const rand = (min: number, max: number) => min + Math.random() * (max - m
 export const randInt = (min: number, max: number) => Math.floor(rand(min, max + 1));
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+export interface HumanTimingProfile {
+  consultSpeed: number;
+  focusedWpmMin: number;
+  focusedWpmMax: number;
+  skimWpmMin: number;
+  skimWpmMax: number;
+  minFocusedMs: number;
+  maxFocusedMs: number;
+  minSkimMs: number;
+  maxSkimMs: number;
+  feedbackIntervalMs: number;
+}
+
+const DEFAULT_TIMING_PROFILE: HumanTimingProfile = {
+  consultSpeed: Math.max(0.25, Number(process.env.BRIDGE_HUMAN_CONSULT_SPEED ?? process.env.BRIDGE_DEMO_SPEED ?? 1)),
+  focusedWpmMin: 165,
+  focusedWpmMax: 230,
+  skimWpmMin: 210,
+  skimWpmMax: 320,
+  minFocusedMs: 1800,
+  maxFocusedMs: 45_000,
+  minSkimMs: 900,
+  maxSkimMs: 18_000,
+  feedbackIntervalMs: 1200,
+};
+
+let timingProfile: HumanTimingProfile = { ...DEFAULT_TIMING_PROFILE };
+
 const CURSOR_ID = '__openclaw_demo_cursor__';
 const CURSOR_STYLE_ID = '__openclaw_demo_cursor_style__';
 
 function demoSlowdown() {
   return Math.max(0.25, Number(process.env.BRIDGE_DEMO_SPEED ?? 1));
+}
+
+function consultationSlowdown() {
+  return timingProfile.consultSpeed;
 }
 
 function isCursorEnabled() {
@@ -25,6 +57,45 @@ export function getCursorPos() {
 export function setCursorPos(x: number, y: number) {
   _curX = x;
   _curY = y;
+}
+
+function clampNumber(value: unknown, min: number, max: number, fallback: number) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
+}
+
+export function getHumanTimingProfile() {
+  return { ...timingProfile };
+}
+
+export function updateHumanTimingProfile(patch: Partial<HumanTimingProfile>) {
+  timingProfile = {
+    consultSpeed: clampNumber(patch.consultSpeed, 0.25, 8, timingProfile.consultSpeed),
+    focusedWpmMin: clampNumber(patch.focusedWpmMin, 80, 500, timingProfile.focusedWpmMin),
+    focusedWpmMax: clampNumber(patch.focusedWpmMax, 80, 650, timingProfile.focusedWpmMax),
+    skimWpmMin: clampNumber(patch.skimWpmMin, 100, 700, timingProfile.skimWpmMin),
+    skimWpmMax: clampNumber(patch.skimWpmMax, 100, 850, timingProfile.skimWpmMax),
+    minFocusedMs: clampNumber(patch.minFocusedMs, 0, 120_000, timingProfile.minFocusedMs),
+    maxFocusedMs: clampNumber(patch.maxFocusedMs, 500, 180_000, timingProfile.maxFocusedMs),
+    minSkimMs: clampNumber(patch.minSkimMs, 0, 60_000, timingProfile.minSkimMs),
+    maxSkimMs: clampNumber(patch.maxSkimMs, 500, 120_000, timingProfile.maxSkimMs),
+    feedbackIntervalMs: clampNumber(patch.feedbackIntervalMs, 250, 10_000, timingProfile.feedbackIntervalMs),
+  };
+  if (timingProfile.focusedWpmMin > timingProfile.focusedWpmMax) {
+    [timingProfile.focusedWpmMin, timingProfile.focusedWpmMax] = [timingProfile.focusedWpmMax, timingProfile.focusedWpmMin];
+  }
+  if (timingProfile.skimWpmMin > timingProfile.skimWpmMax) {
+    [timingProfile.skimWpmMin, timingProfile.skimWpmMax] = [timingProfile.skimWpmMax, timingProfile.skimWpmMin];
+  }
+  if (timingProfile.minFocusedMs > timingProfile.maxFocusedMs) timingProfile.maxFocusedMs = timingProfile.minFocusedMs;
+  if (timingProfile.minSkimMs > timingProfile.maxSkimMs) timingProfile.maxSkimMs = timingProfile.minSkimMs;
+  return getHumanTimingProfile();
+}
+
+export function resetHumanTimingProfile() {
+  timingProfile = { ...DEFAULT_TIMING_PROFILE };
+  return getHumanTimingProfile();
 }
 
 function bezier(t: number, p0: number, p1: number, p2: number, p3: number): number {
@@ -134,6 +205,97 @@ export async function humanScroll(page: Page, deltaY: number, deltaX = 0) {
     await paintCursor(page, _curX + rand(-4, 4), _curY + rand(-4, 4));
     await sleep(rand(120, 260) * demoSlowdown());
   }
+}
+
+export async function humanJitter(page: Page, radius = 18, moves = 4) {
+  await ensureVisibleCursor(page);
+  const safeMoves = Math.max(1, Math.min(Math.round(moves), 20));
+  for (let i = 0; i < safeMoves; i++) {
+    await humanMove(page, _curX + rand(-radius, radius), _curY + rand(-radius, radius));
+    await sleep(rand(70, 220) * demoSlowdown());
+  }
+}
+
+export async function humanIdle(page: Page, durationMs = 1800) {
+  const end = Date.now() + Math.max(0, durationMs);
+  const viewport = page.viewportSize() ?? { width: 1280, height: 800 };
+  while (Date.now() < end) {
+    const x = randInt(80, Math.max(100, viewport.width - 80));
+    const y = randInt(90, Math.max(120, viewport.height - 120));
+    await humanMove(page, x, y);
+    if (Math.random() < 0.3) await humanJitter(page, randInt(8, 22), randInt(2, 5));
+    await sleep(rand(450, 1300) * demoSlowdown());
+  }
+}
+
+export async function humanSkim(page: Page, steps = 4, amount = 420) {
+  const safeSteps = Math.max(1, Math.min(Math.round(steps), 20));
+  for (let i = 0; i < safeSteps; i++) {
+    if (Math.random() < 0.35) await humanJitter(page, randInt(10, 26), randInt(2, 4));
+    await humanScroll(page, amount * rand(0.65, 1.25));
+    await sleep(rand(700, 1800) * demoSlowdown());
+    if (Math.random() < 0.18) {
+      await humanScroll(page, -amount * rand(0.15, 0.45));
+      await sleep(rand(400, 900) * demoSlowdown());
+    }
+  }
+}
+
+export async function humanPreClick(page: Page, x: number, y: number) {
+  await humanMove(page, x + rand(-8, 8), y + rand(-5, 5));
+  await humanPause(180, 620);
+  if (Math.random() < 0.45) await humanJitter(page, randInt(3, 10), randInt(1, 3));
+  await humanMove(page, x, y);
+  await humanPause(90, 260);
+}
+
+export function estimateHumanConsultationMs(text: string, options: { focused?: boolean } = {}) {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  const words = normalized ? normalized.split(' ').length : 0;
+  const punctuationPauses = (normalized.match(/[.!?;:]/g) ?? []).length;
+  const wpm = options.focused
+    ? rand(timingProfile.focusedWpmMin, timingProfile.focusedWpmMax)
+    : rand(timingProfile.skimWpmMin, timingProfile.skimWpmMax);
+  const baseMs = (words / wpm) * 60_000;
+  const scanMs = Math.min(normalized.length * rand(6, 14), 10_000);
+  const pauseMs = punctuationPauses * rand(90, 220);
+  const minimumMs = options.focused
+    ? rand(timingProfile.minFocusedMs, Math.max(timingProfile.minFocusedMs, timingProfile.minFocusedMs + 1400))
+    : rand(timingProfile.minSkimMs, Math.max(timingProfile.minSkimMs, timingProfile.minSkimMs + 900));
+  const maximumMs = options.focused ? timingProfile.maxFocusedMs : timingProfile.maxSkimMs;
+  return Math.round(Math.max(minimumMs, Math.min(maximumMs, baseMs + scanMs + pauseMs)) * consultationSlowdown());
+}
+
+export async function humanConsult(
+  page: Page,
+  text: string,
+  options: { focused?: boolean; reason?: string; onFeedback?: (event: Record<string, unknown>) => void } = {},
+) {
+  const durationMs = estimateHumanConsultationMs(text, options);
+  const startedAt = Date.now();
+  const slices = Math.max(1, Math.min(12, Math.round(durationMs / timingProfile.feedbackIntervalMs)));
+  for (let i = 0; i < slices; i++) {
+    const elapsedMs = Date.now() - startedAt;
+    options.onFeedback?.({
+      phase: 'consulting',
+      reason: options.reason ?? 'reading',
+      elapsedMs,
+      remainingMs: Math.max(0, durationMs - elapsedMs),
+      progress: Math.min(1, elapsedMs / Math.max(1, durationMs)),
+      timing: getHumanTimingProfile(),
+    });
+    if (Math.random() < 0.45) await humanJitter(page, randInt(5, 18), randInt(1, 3));
+    await sleep((durationMs / slices) * rand(0.82, 1.18));
+  }
+  options.onFeedback?.({
+    phase: 'consulted',
+    reason: options.reason ?? 'reading',
+    elapsedMs: Date.now() - startedAt,
+    remainingMs: 0,
+    progress: 1,
+    timing: getHumanTimingProfile(),
+  });
+  return durationMs;
 }
 
 export async function humanPause(minMs = 300, maxMs = 900) {

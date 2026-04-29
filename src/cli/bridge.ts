@@ -54,10 +54,47 @@ function mapCommand(type: string, pParts: string[]): any {
       return { type: 'wait', payload: { ms: Number(pParts[0]) || 1000 } };
     case 'annotate': return { type: 'page.annotate', payload: { noImage: pParts.includes('--no-image') } };
     case 'extract': return { type: 'dom.extract', payload: { type: pParts[0]?.startsWith('--type') ? pParts[0].split('=')[1] : pParts[1] } };
+    case 'visible-text': return { type: 'dom.visibleText', payload: {
+      textFilter: pParts.find(p => p.startsWith('--filter='))?.split('=').slice(1).join('='),
+      query: pParts.find(p => p.startsWith('--query='))?.split('=').slice(1).join('='),
+      limit: Number(pParts.find(p => p.startsWith('--limit='))?.split('=')[1]) || undefined,
+    } };
     case 'status': return { type: 'browser.status', payload: {} };
     case 'screenshot': return { type: 'vision.screenshot', payload: { fullPage: pParts.includes('--full-page') } };
     case 'scroll': return { type: 'agent.scroll', payload: { direction: Number(pParts[0]) < 0 ? 'up' : 'down', amount: Math.abs(Number(pParts[0]) || 600) } };
     case 'discover': return { type: 'agent.discoverScroll', payload: { steps: Number(pParts[0]) || 5, amount: Number(pParts[1]) || 650 } };
+    case 'scan': return { type: 'human.scan', payload: {
+      steps: Number(pParts.find(p => p.startsWith('--steps='))?.split('=')[1]) || Number(pParts[0]) || 4,
+      amount: Number(pParts.find(p => p.startsWith('--amount='))?.split('=')[1]) || undefined,
+      textFilter: pParts.find(p => p.startsWith('--filter='))?.split('=').slice(1).join('='),
+    } };
+    case 'idle': return { type: 'human.idle', payload: { durationMs: Number(pParts[0]) || undefined } };
+    case 'jitter': return { type: 'human.jitter', payload: { radius: Number(pParts[0]) || undefined, moves: Number(pParts[1]) || undefined } };
+    case 'skim': return { type: 'human.skim', payload: { steps: Number(pParts[0]) || undefined, amount: Number(pParts[1]) || undefined } };
+    case 'backtrack': return { type: 'human.backtrack', payload: {} };
+    case 'focus-cycle': return { type: 'human.focusCycle', payload: { times: Number(pParts[0]) || undefined } };
+    case 'back': return { type: 'human.goBack', payload: {} };
+    case 'forward': return { type: 'human.goForward', payload: {} };
+    case 'find-text': return { type: 'human.findText', payload: { text: pParts.join(' ') } };
+    case 'click-text': return { type: 'human.clickText', payload: { text: pParts.join(' ') } };
+    case 'timing': {
+      const action = pParts[0] ?? 'get';
+      if (action === 'get') return { type: 'human.timing.get', payload: {} };
+      if (action === 'reset') return { type: 'human.timing.reset', payload: {} };
+      if (action === 'set') {
+        const payload = Object.fromEntries(
+          pParts.slice(1)
+            .filter(p => p.includes('='))
+            .map(p => {
+              const [key, ...rest] = p.split('=');
+              return [key, Number(rest.join('='))];
+            }),
+        );
+        return { type: 'human.timing.set', payload };
+      }
+      return null;
+    }
+    case 'antispam': return { type: 'human.antispam.check', payload: {} };
     case 'summary': return { type: 'agent.summary', payload: {} };
     case 'run':
       return {
@@ -133,6 +170,10 @@ async function main() {
   ws.on('message', (data) => {
     const msg = JSON.parse(data.toString());
     if (msg.type === 'vision.frame' || msg.type === 'hello') return;
+    if (msg.type === 'human.feedback') {
+      console.error(JSON.stringify(msg.payload, null, flags.quiet ? 0 : 2));
+      return;
+    }
     
     if (msg.ok) {
       const res = msg.result;

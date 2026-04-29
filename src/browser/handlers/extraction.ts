@@ -79,5 +79,61 @@ export function extractionHandlers(ctx: HandlerContext): Record<string, Handler>
       }
       return { text: await page.evaluate(() => document.body.innerText) };
     },
+
+    'dom.visibleText': async ({ query, textFilter, limit = 300, includeHidden = false }: any = {}) => {
+      const page = await ctx.p();
+      await assertNoAntiBot(page);
+      await assertUsefulPage(page, 'dom.visibleText');
+      const max = Math.max(1, Math.min(Number(limit) || 300, 2000));
+      const items = await page.evaluate(
+        ({ query, textFilter, limit, includeHidden }) => {
+          const root = query ? document.querySelector(query) : document.body;
+          if (!root) return [];
+          const filter = textFilter ? new RegExp(textFilter, 'i') : null;
+          const out: any[] = [];
+          for (const el of Array.from(root.querySelectorAll('*')) as Element[]) {
+            const h = el as HTMLElement;
+            const raw = h.innerText || h.textContent || '';
+            const text = raw.replace(/\s+/g, ' ').trim();
+            if (!text) continue;
+            if (filter && !filter.test(text)) continue;
+            const style = window.getComputedStyle(el);
+            if (!includeHidden && (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0')) continue;
+            const r = el.getBoundingClientRect();
+            if (!includeHidden && (r.width < 1 || r.height < 1)) continue;
+            const childrenText = (Array.from(el.children) as Element[])
+              .map((child) => ((child as HTMLElement).innerText || child.textContent || '').replace(/\s+/g, ' ').trim())
+              .filter(Boolean);
+            if (childrenText.some((childText) => childText === text)) continue;
+            const tag = el.tagName.toLowerCase();
+            const id = h.id;
+            const aria = el.getAttribute('aria-label');
+            const cls = String(h.className || '')
+              .split(/\s+/)
+              .filter(Boolean)
+              .slice(0, 3)
+              .map((c) => `.${CSS.escape(c)}`)
+              .join('');
+            const selector = id
+              ? `${tag}#${CSS.escape(id)}`
+              : aria
+                ? `${tag}[aria-label="${aria.replace(/"/g, '\\"').slice(0, 80)}"]`
+                : `${tag}${cls}`;
+            out.push({
+              text,
+              tag,
+              role: h.getAttribute('role') || '',
+              ariaLabel: h.getAttribute('aria-label') || '',
+              selector,
+              box: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) },
+            });
+            if (out.length >= limit) break;
+          }
+          return out;
+        },
+        { query, textFilter, limit: max, includeHidden },
+      );
+      return { type: 'visible-text', count: items.length, items };
+    },
   };
 }

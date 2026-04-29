@@ -2,7 +2,22 @@ import type { Page } from 'playwright';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { HandlerContext, Handler } from './types.js';
-import { humanMove, humanScroll, humanPause, sleep, randInt } from '../human.js';
+import {
+  flashClick,
+  getHumanTimingProfile,
+  humanConsult,
+  humanIdle,
+  humanJitter,
+  humanMove,
+  humanPause,
+  humanPreClick,
+  humanScroll,
+  humanSkim,
+  resetHumanTimingProfile,
+  sleep,
+  randInt,
+  updateHumanTimingProfile,
+} from '../human.js';
 import { SEARCH_URLS } from './navigation.js';
 import { validate } from './validate.js';
 import { extractFrenchPhones } from './phone.js';
@@ -34,6 +49,10 @@ async function autoAcceptCookies(page: Page) {
     } catch { /* ignore */ }
   }
   return false;
+}
+
+function humanFeedback(ctx: HandlerContext, event: Record<string, unknown>) {
+  ctx.broadcast({ type: 'human.feedback', payload: { t: Date.now(), ...event } });
 }
 
 export function specialHandlers(ctx: HandlerContext): Record<string, Handler> {
@@ -187,16 +206,64 @@ export function specialHandlers(ctx: HandlerContext): Record<string, Handler> {
     },
 
     // --- Human behavior ---
-    'human.read': async ({ durationMs = 4000 }: any = {}) => {
+    'human.timing.get': async () => {
+      return { ok: true, timing: getHumanTimingProfile() };
+    },
+
+    'human.timing.set': async (payload: any = {}) => {
+      const timing = updateHumanTimingProfile(payload);
+      humanFeedback(ctx, { phase: 'timing.updated', timing });
+      return { ok: true, timing };
+    },
+
+    'human.timing.reset': async () => {
+      const timing = resetHumanTimingProfile();
+      humanFeedback(ctx, { phase: 'timing.reset', timing });
+      return { ok: true, timing };
+    },
+
+    'human.antispam.check': async () => {
       const page = await ctx.p();
-      const end = Date.now() + durationMs;
-      while (Date.now() < end) {
-        await humanScroll(page, randInt(80, 250));
-        await humanPause(600, 1600);
+      try {
+        await assertNoAntiBot(page);
+        const result = { ok: true, blocked: false, url: page.url(), title: await page.title() };
+        humanFeedback(ctx, { phase: 'antispam.ok', ...result });
+        return result;
+      } catch (err: any) {
+        const result = { ok: true, blocked: true, warning: err.message, url: page.url(), title: await page.title() };
+        humanFeedback(ctx, { phase: 'antispam.warning', ...result });
+        return result;
+      }
+    },
+
+    'human.read': async ({ durationMs, focused = true }: any = {}) => {
+      const page = await ctx.p();
+      const text = await page.evaluate(() => document.body.innerText);
+      const requestedDuration = Number(durationMs);
+      const safeDuration = durationMs === undefined || !Number.isFinite(requestedDuration)
+        ? await humanConsult(page, text, {
+            focused: Boolean(focused),
+            reason: 'human.read',
+            onFeedback: (event) => humanFeedback(ctx, event),
+          })
+        : Math.max(0, requestedDuration);
+      if (durationMs !== undefined && Number.isFinite(requestedDuration)) {
+        const end = Date.now() + safeDuration;
+        while (Date.now() < end) {
+          humanFeedback(ctx, {
+            phase: 'consulting',
+            reason: 'human.read.override',
+            remainingMs: Math.max(0, end - Date.now()),
+            timing: getHumanTimingProfile(),
+          });
+          await humanScroll(page, randInt(70, 220));
+          await humanPause(900, 2400);
+        }
       }
       return { 
         ok: true, 
-        text: await page.evaluate(() => document.body.innerText),
+        durationMs: safeDuration,
+        text,
         url: page.url(),
         title: await page.title()
       };
@@ -211,6 +278,180 @@ export function specialHandlers(ctx: HandlerContext): Record<string, Handler> {
         await assertNoAntiBot(page);
       }
       return { ok: true };
+    },
+
+    'human.idle': async ({ durationMs = 1800 }: any = {}) => {
+      const page = await ctx.p();
+      await humanIdle(page, Number(durationMs) || 1800);
+      await assertNoAntiBot(page);
+      return { ok: true, durationMs };
+    },
+
+    'human.jitter': async ({ radius = 18, moves = 4 }: any = {}) => {
+      const page = await ctx.p();
+      await humanJitter(page, Number(radius) || 18, Number(moves) || 4);
+      await assertNoAntiBot(page);
+      return { ok: true, radius, moves };
+    },
+
+    'human.skim': async ({ steps = 4, amount = 420 }: any = {}) => {
+      const page = await ctx.p();
+      await humanSkim(page, Number(steps) || 4, Number(amount) || 420);
+      await assertNoAntiBot(page);
+      return { ok: true, steps, amount };
+    },
+
+    'human.backtrack': async ({ pauseMs = 900 }: any = {}) => {
+      const page = await ctx.p();
+      await humanScroll(page, -randInt(220, 520));
+      await humanPause(Number(pauseMs) || 900, (Number(pauseMs) || 900) + 800);
+      await assertNoAntiBot(page);
+      return { ok: true };
+    },
+
+    'human.focusCycle': async ({ times = 1 }: any = {}) => {
+      const page = await ctx.p();
+      const safeTimes = Math.max(1, Math.min(Number(times) || 1, 5));
+      for (let i = 0; i < safeTimes; i++) {
+        await page.keyboard.press('Tab');
+        await humanPause(250, 850);
+      }
+      await assertNoAntiBot(page);
+      return { ok: true, times: safeTimes };
+    },
+
+    'human.goBack': async ({ waitMs = 1200 }: any = {}) => {
+      const page = await ctx.p();
+      await humanPause(250, 900);
+      await page.goBack({ waitUntil: 'domcontentloaded' }).catch(() => null);
+      await humanPause(Number(waitMs) || 1200, (Number(waitMs) || 1200) + 1200);
+      await assertNoAntiBot(page);
+      return { ok: true, url: page.url(), title: await page.title() };
+    },
+
+    'human.goForward': async ({ waitMs = 1200 }: any = {}) => {
+      const page = await ctx.p();
+      await humanPause(250, 900);
+      await page.goForward({ waitUntil: 'domcontentloaded' }).catch(() => null);
+      await humanPause(Number(waitMs) || 1200, (Number(waitMs) || 1200) + 1200);
+      await assertNoAntiBot(page);
+      return { ok: true, url: page.url(), title: await page.title() };
+    },
+
+    'human.scan': async ({ steps = 4, amount = 520, textFilter, limitPerStep = 40 }: any = {}) => {
+      if (!ctx.dispatch) throw new Error('human.scan requires dispatcher');
+      const page = await ctx.p();
+      const snapshots = [];
+      const safeSteps = Math.max(1, Math.min(Number(steps) || 4, 20));
+      for (let i = 0; i < safeSteps; i++) {
+        await assertNoAntiBot(page);
+        const visible = await ctx.dispatch('dom.visibleText', {
+          textFilter,
+          limit: Math.max(1, Math.min(Number(limitPerStep) || 40, 200)),
+        });
+        snapshots.push({
+          step: i + 1,
+          url: page.url(),
+          title: await page.title(),
+          count: visible.count,
+          items: visible.items,
+        });
+        const visibleText = visible.items?.map((item: any) => item.text ?? '').join(' ') ?? '';
+        if (visibleText) {
+          await humanConsult(page, visibleText, {
+            reason: `human.scan.step.${i + 1}`,
+            onFeedback: (event) => humanFeedback(ctx, { ...event, step: i + 1, totalSteps: safeSteps }),
+          });
+        }
+        if (i < safeSteps - 1) {
+          humanFeedback(ctx, {
+            phase: 'scrolling',
+            reason: 'human.scan',
+            step: i + 1,
+            totalSteps: safeSteps,
+            timing: getHumanTimingProfile(),
+          });
+          await humanScroll(page, Number(amount) || 520);
+          await humanPause(900, 2200);
+        }
+      }
+      return { ok: true, snapshots };
+    },
+
+    'human.findText': async ({ text, exact = false, maxScrolls = 4 }: any) => {
+      if (!text) throw new Error('human.findText: text is required');
+      const page = await ctx.p();
+      const needle = String(text);
+      const safeScrolls = Math.max(0, Math.min(Number(maxScrolls) || 0, 20));
+      for (let attempt = 0; attempt <= safeScrolls; attempt++) {
+        await assertNoAntiBot(page);
+        const hits = await page.evaluate(
+          ({ needle, exact }) => {
+            const out: any[] = [];
+            const q = String(needle).toLowerCase();
+            for (const el of Array.from(document.body.querySelectorAll('*')) as Element[]) {
+              const h = el as HTMLElement;
+              const value = (h.innerText || h.textContent || '').replace(/\s+/g, ' ').trim();
+              if (!value) continue;
+              const hay = value.toLowerCase();
+              if (exact ? hay !== q : !hay.includes(q)) continue;
+              const style = window.getComputedStyle(el);
+              if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') continue;
+              const r = el.getBoundingClientRect();
+              if (r.width < 2 || r.height < 2) continue;
+              const childSame = (Array.from(el.children) as Element[]).some((child) => {
+                const childText = ((child as HTMLElement).innerText || child.textContent || '').replace(/\s+/g, ' ').trim();
+                return childText === value;
+              });
+              if (childSame) continue;
+              out.push({
+                text: value,
+                tag: el.tagName.toLowerCase(),
+                role: h.getAttribute('role') || '',
+                box: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) },
+              });
+              if (out.length >= 20) break;
+            }
+            return out;
+          },
+          { needle, exact },
+        );
+        if (hits.length) {
+          await humanConsult(page, hits.map((hit: any) => hit.text).join(' '), {
+            reason: 'human.findText.hit-review',
+            onFeedback: (event) => humanFeedback(ctx, event),
+          });
+          return { found: true, attempt, hits };
+        }
+        if (attempt < safeScrolls) {
+          humanFeedback(ctx, {
+            phase: 'scrolling',
+            reason: 'human.findText',
+            attempt,
+            maxScrolls: safeScrolls,
+            timing: getHumanTimingProfile(),
+          });
+          await humanScroll(page, 520);
+          await humanPause(900, 2200);
+        }
+      }
+      return { found: false, hits: [] };
+    },
+
+    'human.clickText': async ({ text, exact = false, maxScrolls = 4 }: any) => {
+      if (!ctx.dispatch) throw new Error('human.clickText requires dispatcher');
+      const page = await ctx.p();
+      const found = await ctx.dispatch('human.findText', { text, exact, maxScrolls });
+      if (!found.found || !found.hits?.length) throw new Error(`human.clickText: visible text not found: ${text}`);
+      const hit = found.hits[0];
+      const x = hit.box.x + Math.round(hit.box.w / 2);
+      const y = hit.box.y + Math.round(Math.min(hit.box.h / 2, 24));
+      await humanPreClick(page, x, y);
+      await page.mouse.click(x, y, { delay: randInt(60, 170) });
+      await flashClick(page, x, y);
+      await humanPause(700, 1400);
+      await assertNoAntiBot(page);
+      return { clicked: hit.text, x, y, url: page.url(), title: await page.title() };
     },
 
     // --- Vision ---

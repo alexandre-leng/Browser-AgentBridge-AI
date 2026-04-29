@@ -1,7 +1,7 @@
 import type { Page } from 'playwright';
 import type { HandlerContext, Handler } from './types.js';
 import { resolve, resolveVisible } from '../resolver.js';
-import { flashClick, humanMove, humanType, humanScroll, humanPause, sleep, rand, randInt } from '../human.js';
+import { flashClick, humanMove, humanPreClick, humanType, humanScroll, humanPause, sleep, rand, randInt } from '../human.js';
 import { assertNoAntiBot } from '../polite.js';
 
 async function centerOf(page: Page, query: string) {
@@ -17,7 +17,7 @@ export function domHandlers(ctx: HandlerContext): Record<string, Handler> {
       const page = await ctx.p();
       const q = query ?? selector ?? text;
       const { x, y } = await centerOf(page, q);
-      await humanMove(page, x, y);
+      await humanPreClick(page, x, y);
       await sleep(rand(50, 150));
       await page.mouse.click(x, y, { delay: randInt(40, 120) });
       await flashClick(page, x, y);
@@ -28,7 +28,7 @@ export function domHandlers(ctx: HandlerContext): Record<string, Handler> {
     'dom.doubleClick': async ({ query, selector, text }) => {
       const page = await ctx.p();
       const { x, y } = await centerOf(page, query ?? selector ?? text);
-      await humanMove(page, x, y);
+      await humanPreClick(page, x, y);
       await page.mouse.dblclick(x, y);
       await flashClick(page, x, y);
       await assertNoAntiBot(page);

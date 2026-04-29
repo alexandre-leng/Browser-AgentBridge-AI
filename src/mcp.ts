@@ -114,6 +114,42 @@ server.registerTool('extract_schema', {
   return asText(await dispatch('dom.extract', args));
 });
 
+server.registerTool('human_timing_get', {
+  title: 'Get human timing profile',
+  description: 'Return the current runtime human consultation timing profile.',
+}, async () => {
+  await ensureBrowser();
+  return asText(await dispatch('human.timing.get', {}));
+});
+
+server.registerTool('human_timing_set', {
+  title: 'Set human timing profile',
+  description: 'Adjust runtime human consultation timings to slow down or speed up browsing behavior.',
+  inputSchema: {
+    consultSpeed: z.number().min(0.25).max(8).optional(),
+    focusedWpmMin: z.number().min(80).max(500).optional(),
+    focusedWpmMax: z.number().min(80).max(650).optional(),
+    skimWpmMin: z.number().min(100).max(700).optional(),
+    skimWpmMax: z.number().min(100).max(850).optional(),
+    minFocusedMs: z.number().min(0).max(120000).optional(),
+    maxFocusedMs: z.number().min(500).max(180000).optional(),
+    minSkimMs: z.number().min(0).max(60000).optional(),
+    maxSkimMs: z.number().min(500).max(120000).optional(),
+    feedbackIntervalMs: z.number().min(250).max(10000).optional(),
+  },
+}, async (args) => {
+  await ensureBrowser();
+  return asText(await dispatch('human.timing.set', args));
+});
+
+server.registerTool('human_antispam_check', {
+  title: 'Check anti-spam state',
+  description: 'Inspect the current page for known anti-bot or anti-spam blocking text without throwing.',
+}, async () => {
+  await ensureBrowser();
+  return asText(await dispatch('human.antispam.check', {}));
+});
+
 server.registerResource('api', 'openclaw://api', {
   title: 'OpenClaw API',
   description: 'Registered OpenClaw command names.',

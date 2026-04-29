@@ -42,7 +42,9 @@ npm start
 npm run mcp
 ```
 
-After `npm run build`, the package exposes `openclaw-mcp`. The MCP server registers focused tools (`browser_status`, `navigate`, `annotate_page`, `click_ref`, `type_ref`, `extract_schema`). A low-level `browser_command` escape hatch is available behind `BRIDGE_MCP_ALLOW_RAW=1`.
+After `npm run build`, the package exposes `openclaw-mcp`. The MCP server registers focused tools (`browser_status`, `navigate`, `annotate_page`, `click_ref`, `type_ref`, `extract_schema`, `human_timing_get`, `human_timing_set`, `human_antispam_check`). A low-level `browser_command` escape hatch is available behind `BRIDGE_MCP_ALLOW_RAW=1`.
+
+The MCP resource `api` (`openclaw://api`) exposes the registered bridge command list, and the `browser_task` prompt gives agents a refs-first task template.
 
 ---
 
@@ -77,6 +79,28 @@ Designed specifically for LLMs (Claude, GPT, Gemini).
 - **`dom.extract {type: "search-results"|"form"|"table"}`**: Returns clean JSON instead of a wall of text.
 - **`dom.extract {schema}`**: Extracts typed fields from CSS selectors.
 - **`dom.extract {schema, llm: true}`**: Produces a strict JSON extraction prompt for an external LLM client.
+- **`human.timing.*`**: Lets an agent read, tune, and reset consultation timings while a session is running.
+- **`human.antispam.check`**: Returns a structured anti-spam warning without throwing, so an agent can pause or hand off cleanly.
+
+### Runtime Human Timing
+
+OpenClaw separates interaction speed from consultation speed. Mouse movement and typing stay humanized, while page-reading pauses can be adjusted live by the agent when a site starts reacting badly to rapid browsing.
+
+```bash
+node bridge-cli.cjs timing get
+node bridge-cli.cjs timing set consultSpeed=1.6 minFocusedMs=3500 feedbackIntervalMs=800
+node bridge-cli.cjs antispam
+```
+
+Typical agent loop:
+
+1. Navigate or annotate.
+2. Call `human.read`, `human.scan`, or `human.findText`.
+3. Watch `human.feedback` WebSocket events for `phase`, `remainingMs`, `progress`, and active `timing`.
+4. If the page feels sensitive, call `human.timing.set` with a higher `consultSpeed` or larger minimum pauses.
+5. Call `human.antispam.check` before continuing with more clicks or searches.
+
+`consultSpeed` is a multiplier: `1` is default, `1.5` is slower, `0.75` is faster. Prefer slowing down and handing off to a human if `human_antispam_check` reports a block; OpenClaw is designed for polite automation, not bypassing protections.
 
 Schema extraction example:
 ```json
@@ -131,18 +155,31 @@ npm test
 |---|---|---|
 | `PORT` | HTTP/WS port | `8080` |
 | `BRIDGE_HOST` | Bind address | `127.0.0.1` |
+| `BRIDGE_URL` | WebSocket URL used by the TypeScript CLI | `ws://localhost:8080/ws/browser-bridge` |
 | `BRIDGE_TOKEN` | WS auth token (`Authorization: Bearer <token>` or `?token=`). Required when binding outside localhost. | *(local only may be empty)* |
 | `BRIDGE_ADMIN_TOKEN` | Token for `exec.script` when explicitly enabled | *(command disabled)* |
 | `BRIDGE_ALLOW_EXEC_SCRIPT` | Enable arbitrary page JS eval when set to `1` | `0` |
 | `BRIDGE_ALLOW_FILE_URLS` | Enable `file:` navigation when set to `1` | `0` |
 | `BRIDGE_ALLOWED_FILE_ROOTS` | CSV allowlist of file roots for `file:` navigation | *(empty)* |
+| `CHROME_CHANNEL` | Browser channel (`chrome`, `chromium`, `msedge`) | `chrome` |
+| `CHROME_PROFILE` | Persistent browser profile directory | *(new context)* |
+| `CHROME_CDP_URL` | Connect to an existing browser over CDP | *(empty)* |
+| `BRIDGE_PLAYWRIGHT_SLOWMO_MS` | Playwright-level slow motion in milliseconds | `0` |
+| `BRIDGE_BRING_TO_FRONT` | Bring the active page to front (`0` disables) | `1` |
 | `BRIDGE_POLITE_MODE` | Enable domain pacing and anti-bot detection (`0` disables) | `1` |
 | `BRIDGE_POLITE_MIN_DELAY_MS` | Minimum delay between navigations to the same host | `12000` |
+| `BRIDGE_AUTO_COOKIES` | Automatically handle known cookie prompts (`0` disables) | `1` |
+| `BRIDGE_HUMAN_WARMUP` | Human movement/pause warmup after navigation (`0` disables) | `1` |
+| `BRIDGE_PAGE_WARMUP_MS` | Human warmup duration after navigation | `2500` |
+| `BRIDGE_HUMAN_CONSULT_SPEED` | Initial multiplier for human consultation pauses | `BRIDGE_DEMO_SPEED` or `1` |
+| `BRIDGE_DEMO_SPEED` | General multiplier for demo movement/pause timing | `1` |
+| `BRIDGE_VISIBLE_CURSOR` | Show injected visible cursor (`0` disables) | `1` |
 | `BRIDGE_ALLOWED_ORIGINS` | CSV of allowed `Origin` headers | *(any)* |
 | `BRIDGE_DEFAULT_TIMEOUT_MS` | Default Playwright timeout | `15000` |
 | `BRIDGE_DEFAULT_NAV_TIMEOUT_MS` | Default navigation timeout | `20000` |
 | `BRIDGE_LOG_JSON` | Emit logs as JSON if `1` | `0` |
 | `BRIDGE_LOG_LEVEL` | Minimum log level (`debug`/`info`/`warn`/`error`) | `info` |
+| `BRIDGE_MCP_ALLOW_RAW` | Expose low-level MCP `browser_command` when set to `1` | `0` |
 
 Hardening: path-traversal guard on `/viewer/` & `/captures/`, WS `verifyClient` (Origin + token), token required outside localhost, URL allowlist (`http:`, `https:`, `about:` by default), explicit `file:` roots, explicit `exec.script` enablement, cookie structure validation, security headers (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, viewer CSP), scrubbed error messages.
 

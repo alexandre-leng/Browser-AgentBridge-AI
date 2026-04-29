@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import type { HandlerContext, Handler } from './types.js';
 import { sessionStore } from '../controller.js';
 import { resolveVisible } from '../resolver.js';
-import { flashClick, humanMove, humanType, humanPause, sleep, rand, randInt } from '../human.js';
+import { flashClick, humanMove, humanPreClick, humanType, humanPause, sleep, rand, randInt } from '../human.js';
 import { annotateInteractive, accessibilityTree, findByRef, findSimilar, getAgentElements, type AgentElement } from '../agent.js';
 import { assertNoAntiBot, assertUsefulPage } from '../polite.js';
 
@@ -96,7 +96,7 @@ export function agentHandlers(ctx: HandlerContext): Record<string, Handler> {
           const el = await getEl(ref, retry);
           const x = el.box.x + Math.round(el.box.w / 2);
           const y = el.box.y + Math.round(el.box.h / 2);
-          await humanMove(page, x, y);
+          await humanPreClick(page, x, y);
           await sleep(rand(50, 130));
           if (double) {
             await page.mouse.dblclick(x, y);
@@ -126,7 +126,7 @@ export function agentHandlers(ctx: HandlerContext): Record<string, Handler> {
       });
       const x = el.box.x + Math.round(el.box.w / 2);
       const y = el.box.y + Math.round(el.box.h / 2);
-      await humanMove(page, x, y);
+      await humanPreClick(page, x, y);
       await page.mouse.click(x, y, { delay: randInt(30, 80) });
       await flashClick(page, x, y);
       await humanPause(80, 200);
