@@ -3,6 +3,14 @@ import { extractFrenchPhones } from './phone.js';
 import { buildJsonSchemaPrompt, extractWithSchema } from '../schemaExtract.js';
 import { assertNoAntiBot, assertUsefulPage } from '../polite.js';
 
+function normalizeFilterTerms(textFilter?: string, filterAny?: string[] | string) {
+  if (Array.isArray(filterAny)) return filterAny.map(String).map(s => s.trim()).filter(Boolean);
+  if (typeof filterAny === 'string') return filterAny.split(/[,\s]+/).map(s => s.trim()).filter(Boolean);
+  if (!textFilter) return [];
+  if (textFilter.includes('|')) return [];
+  return textFilter.split(',').map(s => s.trim()).filter(Boolean);
+}
+
 export function extractionHandlers(ctx: HandlerContext): Record<string, Handler> {
   return {
     'dom.extract': async ({ type, schema, llm = false }: any = {}) => {
@@ -76,20 +84,69 @@ export function extractionHandlers(ctx: HandlerContext): Record<string, Handler>
           address: r.text.match(ADDRESS_RE)?.[0] ?? '',
         })).filter(r => r.title && (r.phone || r.address));
         return { type, results };
+      } else if (type === 'listings') {
+        const raw = await page.evaluate(() => {
+          const selectors = [
+            '[role="article"]',
+            '[role="listitem"]',
+            '[data-result-id]',
+            '.Nv2PK',
+            '.hfpxzc',
+            '.VkpGBb',
+            '.tF2Cxc',
+            'article',
+          ].join(', ');
+          const nodes = Array.from(document.querySelectorAll(selectors)) as HTMLElement[];
+          const candidates = nodes.length ? nodes : Array.from(document.querySelectorAll('a, div')) as HTMLElement[];
+          const seen = new Set<string>();
+          return candidates.map((el) => {
+            const text = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+            if (text.length < 12 || text.length > 2500) return null;
+            const link = (el.closest('a') as HTMLAnchorElement | null) || el.querySelector('a[href]') as HTMLAnchorElement | null;
+            const title =
+              el.getAttribute('aria-label') ||
+              el.querySelector('h1,h2,h3,[role="heading"],.qBF1Pd,.OSrXXb')?.textContent?.trim() ||
+              text.split(/[·\n]/)[0]?.trim() ||
+              '';
+            const key = `${title}|${text.slice(0, 80)}`;
+            if (seen.has(key)) return null;
+            seen.add(key);
+            return { title, text, url: link?.href || '' };
+          }).filter(Boolean).slice(0, 80);
+        }) as { title: string; text: string; url: string }[];
+        const ADDRESS_RE = /\b\d{1,5}\s+(?:rue|avenue|av\.?|boulevard|bd\.?|place|chemin|impasse|route|quai|allée|allee|cours|square)\s+[A-Za-zÀ-ÿ0-9\s'’.-]+/i;
+        const listings = raw.map((r) => {
+          const ratingMatch = r.text.match(/\b([0-5](?:[.,]\d)?)\s*(?:\(\s*([\d\s]+)\s*\)|(?:étoiles?|stars?)?)?/i);
+          const reviewsMatch = r.text.match(/(?:\(([\d\s]+)\)|([\d\s]+)\s+(?:avis|reviews?))/i);
+          const hoursMatch = r.text.match(/\b(?:Ouvert|Fermé|Open|Closed)\b[^·\n]{0,80}/i);
+          return {
+            name: r.title,
+            rating: ratingMatch ? Number(ratingMatch[1].replace(',', '.')) : null,
+            reviews: reviewsMatch ? Number((reviewsMatch[1] || reviewsMatch[2]).replace(/\s+/g, '')) : null,
+            address: r.text.match(ADDRESS_RE)?.[0] ?? '',
+            phone: extractFrenchPhones(r.text)[0] ?? '',
+            website: r.url,
+            hours: hoursMatch?.[0] ?? '',
+            summary: r.text.slice(0, 280),
+          };
+        }).filter((r) => r.name && (r.address || r.phone || r.website || r.rating !== null));
+        return { type, listings };
       }
       return { text: await page.evaluate(() => document.body.innerText) };
     },
 
-    'dom.visibleText': async ({ query, textFilter, limit = 300, includeHidden = false }: any = {}) => {
+    'dom.visibleText': async ({ query, textFilter, filterAny, filterLines = false, limit = 300, includeHidden = false }: any = {}) => {
       const page = await ctx.p();
       await assertNoAntiBot(page);
       await assertUsefulPage(page, 'dom.visibleText');
       const max = Math.max(1, Math.min(Number(limit) || 300, 2000));
+      const filterTerms = normalizeFilterTerms(textFilter, filterAny);
       const items = await page.evaluate(
-        ({ query, textFilter, limit, includeHidden }) => {
+        ({ query, textFilter, filterTerms, filterLines, limit, includeHidden }) => {
           const root = query ? document.querySelector(query) : document.body;
           if (!root) return [];
-          const filter = textFilter ? new RegExp(textFilter, 'i') : null;
+          const filter = textFilter && !filterTerms.length ? new RegExp(textFilter, 'i') : null;
+          const matchesTerms = (text: string) => !filterTerms.length || filterTerms.some((term: string) => text.toLowerCase().includes(term.toLowerCase()));
           const out: any[] = [];
           for (const el of Array.from(root.querySelectorAll('*')) as Element[]) {
             const h = el as HTMLElement;
@@ -97,6 +154,7 @@ export function extractionHandlers(ctx: HandlerContext): Record<string, Handler>
             const text = raw.replace(/\s+/g, ' ').trim();
             if (!text) continue;
             if (filter && !filter.test(text)) continue;
+            if (!filter && !matchesTerms(text)) continue;
             const style = window.getComputedStyle(el);
             if (!includeHidden && (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0')) continue;
             const r = el.getBoundingClientRect();
@@ -119,8 +177,11 @@ export function extractionHandlers(ctx: HandlerContext): Record<string, Handler>
               : aria
                 ? `${tag}[aria-label="${aria.replace(/"/g, '\\"').slice(0, 80)}"]`
                 : `${tag}${cls}`;
-            out.push({
-              text,
+            const lines = filterLines
+              ? raw.split(/\r?\n/).map(line => line.replace(/\s+/g, ' ').trim()).filter(Boolean).filter(line => filter ? filter.test(line) : matchesTerms(line))
+              : [text];
+            for (const line of lines) out.push({
+              text: line,
               tag,
               role: h.getAttribute('role') || '',
               ariaLabel: h.getAttribute('aria-label') || '',
@@ -131,7 +192,7 @@ export function extractionHandlers(ctx: HandlerContext): Record<string, Handler>
           }
           return out;
         },
-        { query, textFilter, limit: max, includeHidden },
+        { query, textFilter, filterTerms, filterLines: Boolean(filterLines), limit: max, includeHidden },
       );
       return { type: 'visible-text', count: items.length, items };
     },

@@ -108,8 +108,21 @@ const INTERACTIVE_SEL = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(', ');
 
+async function ensureEvaluateNameHelper(frame: Frame) {
+  await frame.evaluate(`(() => {
+    if (typeof globalThis.__name !== 'function') {
+      Object.defineProperty(globalThis, '__name', {
+        value: function (fn) { return fn; },
+        writable: true,
+        configurable: true
+      });
+    }
+  })()`).catch(() => {});
+}
+
 /** Collect all in-viewport interactive elements with bounding boxes + accessible names. */
 async function collectElementsRecursive(frame: Frame, offset = { x: 0, y: 0 }, context = { id: 1 }): Promise<AgentElement[]> {
+  await ensureEvaluateNameHelper(frame);
   const elements = await frame.evaluate(({ sel, offset }) => {
     const seen = new Set<string>();
     const result: any[] = [];
@@ -232,11 +245,22 @@ export async function collectElements(page: Page): Promise<AgentElement[]> {
 
 const OVERLAY_ATTR = '__oc_agent_overlay__';
 
-/** Inject numbered bounding-box overlay, take screenshot, remove overlay. */
+/**
+ * Annotate interactive elements on the page and return a screenshot with numbered
+ * bounding boxes plus the element list. Steps:
+ * 1. Collect elements (main frame + iframes, recursive — coords are already absolute).
+ * 2. Inject overlay on the main frame.
+ * 3. Take screenshot.
+ * 4. Remove overlay (fire-and-forget — next call would clean it up anyway).
+ *
+ * Step 4 used to be awaited (~30-50 ms wasted). The overlay self-cleans on the next
+ * annotate via the `document.querySelectorAll([attr]).remove()` at the top of the
+ * draw step, so the async cleanup is purely cosmetic until then.
+ */
 export async function annotateInteractive(page: Page, sessionId: string = 'default'): Promise<{ elements: AgentElement[]; imageB64: string }> {
   const elements = await collectElements(page);
 
-  // Draw overlay
+  await ensureEvaluateNameHelper(page.mainFrame());
   await page.evaluate(
     ({ els, attr }: { els: AgentElement[]; attr: string }) => {
       document.querySelectorAll(`[${attr}]`).forEach((e) => e.remove());
@@ -262,28 +286,46 @@ export async function annotateInteractive(page: Page, sessionId: string = 'defau
 
   const buf = await page.screenshot({ type: 'jpeg', quality: 78, fullPage: false });
 
-  await page.evaluate((attr: string) => {
-    document.querySelectorAll(`[${attr}]`).forEach((e) => e.remove());
-  }, OVERLAY_ATTR);
+  // Fire-and-forget: caller doesn't need to wait for DOM cleanup.
+  page
+    .evaluate((attr: string) => {
+      document.querySelectorAll(`[${attr}]`).forEach((e) => e.remove());
+    }, OVERLAY_ATTR)
+    .catch(() => {
+      /* page may have navigated; next annotate will clean */
+    });
 
   _cache.set(sessionId, elements);
   return { elements, imageB64: buf.toString('base64') };
 }
 
-/** Compact aria tree built from DOM (role + name, no bounding boxes). */
-export async function accessibilityTree(page: Page) {
-  return page.evaluate(() => {
+/**
+ * Compact aria tree built from DOM (role + name, no bounding boxes).
+ * Returns `{ items, total }` so callers can show a real count even when limit < total.
+ * Stopping early in the page-side `evaluate` avoids serializing an unused tail.
+ */
+export async function accessibilityTree(
+  page: Page,
+  opts: { limit?: number } = {},
+): Promise<{ items: { role: string; name: string }[]; total: number }> {
+  const limit = Math.max(1, opts.limit ?? 200);
+  return page.evaluate((max) => {
     const ROLES = ['button', 'link', 'textbox', 'searchbox', 'checkbox', 'radio', 'combobox',
       'listbox', 'option', 'menuitem', 'tab', 'heading', 'img', 'list', 'listitem'];
     const sel = ROLES.map((r) => `[role="${r}"]`).join(', ') +
       ', a[href], button, input:not([type="hidden"]), select, textarea, h1, h2, h3';
-    return Array.from(document.querySelectorAll(sel)).slice(0, 200).map((el) => {
+    const all = document.querySelectorAll(sel);
+    const total = all.length;
+    const items: { role: string; name: string }[] = [];
+    for (let i = 0; i < all.length && items.length < max; i++) {
+      const el = all[i];
       const h = el as HTMLElement;
       const role = h.getAttribute('role') || el.tagName.toLowerCase();
       const name = h.getAttribute('aria-label') ||
         (el as HTMLInputElement).placeholder ||
         h.innerText?.trim().replace(/\s+/g, ' ').slice(0, 100) || '';
-      return { role, name };
-    });
-  });
+      items.push({ role, name });
+    }
+    return { items, total };
+  }, limit);
 }

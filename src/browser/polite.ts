@@ -2,8 +2,34 @@ import type { Page } from 'playwright';
 import { humanMove, humanPause, humanScroll, randInt, sleep } from './human.js';
 
 const DEFAULT_MIN_DELAY_MS = 12000;
+const WARMUP_REUSE_WINDOW_MS = 60_000;
+
 const lastByHost = new Map<string, number>();
 const lastNavigationByHost = new Map<string, { url: string; at: number }>();
+const lastWarmupByHost = new Map<string, number>();
+
+/**
+ * Hosts known to react badly to fast browsing. Populated on the fly when
+ * `assertNoAntiBot` detects a verification page; can be pre-seeded via
+ * `BRIDGE_POLITE_FORCE_HOSTS=google.com,linkedin.com`.
+ *
+ * Adaptive policy: hosts not in this set get 0 ms delay between navigations.
+ * Hosts in the set are throttled to `BRIDGE_POLITE_MIN_DELAY_MS` (12 s default).
+ */
+const aggressiveHosts = new Set<string>(
+  (process.env.BRIDGE_POLITE_FORCE_HOSTS ?? '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean),
+);
+
+export function markHostAggressive(host: string) {
+  if (host) aggressiveHosts.add(host.toLowerCase());
+}
+
+export function isHostAggressive(host: string) {
+  return aggressiveHosts.has(host.toLowerCase());
+}
 
 const ANTI_BOT_PATTERNS = [
   /pourquoi cette vérification/i,
@@ -50,12 +76,19 @@ export async function waitForDomainBudget(rawUrl: string) {
   if (process.env.BRIDGE_POLITE_MODE === '0') return { waitedMs: 0, host: hostOf(rawUrl) };
   const host = hostOf(rawUrl);
   if (!host) return { waitedMs: 0, host };
+  // Adaptive throttle: only enforce the minimum delay on hosts that have been
+  // flagged aggressive (either pre-seeded via env or marked at runtime by
+  // `assertNoAntiBot`). Permissive hosts pay no idle cost on first contact.
+  if (!isHostAggressive(host)) {
+    lastByHost.set(host, Date.now());
+    return { waitedMs: 0, host, mode: 'permissive' as const };
+  }
   const now = Date.now();
   const last = lastByHost.get(host) ?? 0;
   const waitMs = Math.max(0, minDelayMs() - (now - last));
   if (waitMs > 0) await sleep(waitMs);
   lastByHost.set(host, Date.now());
-  return { waitedMs: waitMs, host };
+  return { waitedMs: waitMs, host, mode: 'throttled' as const };
 }
 
 export function looksLikeDirectAppSearch(rawUrl: string): boolean {
@@ -76,6 +109,10 @@ export async function assertNoAntiBot(page: Page) {
   const text = await pageText(page);
   const matched = ANTI_BOT_PATTERNS.find((pattern) => pattern.test(text));
   if (matched) {
+    // Mark the host as aggressive so subsequent navigations are throttled.
+    // This is the trigger that switches a host from "permissive" to "12 s delay".
+    const host = hostOf(page.url());
+    if (host) markHostAggressive(host);
     throw new Error(`anti-bot verification detected (${matched.source}); stopping automation for manual handoff`);
   }
 }
@@ -107,14 +144,43 @@ export async function handleCookieConsent(page: Page) {
   return { handled: false };
 }
 
-export async function warmUpPage(page: Page, durationMs = Number(process.env.BRIDGE_PAGE_WARMUP_MS ?? 2500)) {
+/**
+ * Human-style warm-up after a navigation: a few mouse drifts and pauses to look
+ * less like a robot. Adaptive: skipped for hosts visited in the last 60 s
+ * (cookie banners and bot checks usually only fire on the first visit).
+ *
+ * Use `BRIDGE_HUMAN_WARMUP=0` to disable globally, `BRIDGE_PAGE_WARMUP_MS=0` to
+ * disable per-call.
+ */
+export async function warmUpPage(
+  page: Page,
+  hostOrOpts?: string | { host?: string; durationMs?: number },
+  legacyDurationMs?: number,
+) {
+  const opts =
+    typeof hostOrOpts === 'string'
+      ? { host: hostOrOpts, durationMs: legacyDurationMs }
+      : (hostOrOpts ?? {});
+  // Default 800 ms (was 2500). Combined with the 60 s adaptive skip on
+  // already-visited hosts, this keeps the "tac tac tac" rhythm without losing
+  // the cookie-banner / first-paint settle window.
+  const durationMs = opts.durationMs ?? Number(process.env.BRIDGE_PAGE_WARMUP_MS ?? 800);
   if (process.env.BRIDGE_HUMAN_WARMUP === '0' || durationMs <= 0) return { warmedUp: false };
+  // Skip warm-up if we've recently warmed up on this host — cookie banners /
+  // bot checks usually only fire on the first hit. Saves ~2.5 s per page.
+  if (opts.host) {
+    const last = lastWarmupByHost.get(opts.host);
+    if (last && Date.now() - last < WARMUP_REUSE_WINDOW_MS) {
+      return { warmedUp: false, skipped: 'recent_visit' as const };
+    }
+  }
   const end = Date.now() + durationMs;
   const vp = page.viewportSize() ?? { width: 1280, height: 800 };
   while (Date.now() < end) {
     await humanMove(page, randInt(80, Math.max(100, vp.width - 80)), randInt(90, Math.max(120, vp.height - 120)));
     await humanPause(350, 900);
   }
+  if (opts.host) lastWarmupByHost.set(opts.host, Date.now());
   return { warmedUp: true, durationMs };
 }
 
@@ -137,7 +203,7 @@ export async function politeGoto(page: Page, url: string, options: { waitUntil?:
   await page.goto(url, { waitUntil: options.waitUntil ?? 'domcontentloaded' });
   lastNavigationByHost.set(host, { url: page.url(), at: Date.now() });
   const cookies = await handleCookieConsent(page);
-  const warmup = await warmUpPage(page);
+  const warmup = await warmUpPage(page, { host });
   await assertNoAntiBot(page);
   await assertUsefulPage(page, 'navigate');
   return { ...budget, cookies, warmup, directSearch };

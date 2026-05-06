@@ -31,7 +31,19 @@ export function parseArgs(input: string): string[] {
   return args;
 }
 
-function mapCommand(type: string, pParts: string[]): any {
+function optValue(parts: string[], name: string) {
+  const prefix = `${name}=`;
+  const inline = parts.find(p => p.startsWith(prefix));
+  if (inline) return inline.slice(prefix.length);
+  const idx = parts.indexOf(name);
+  return idx >= 0 ? parts[idx + 1] : undefined;
+}
+
+function csvTerms(value: string | undefined) {
+  return value ? value.split(',').map(s => s.trim()).filter(Boolean) : undefined;
+}
+
+export function mapCommand(type: string, pParts: string[]): any {
   switch (type) {
     case 'navigate': return { type: 'navigate', payload: { url: pParts[0], autoAnnotate: pParts.includes('--annotate') } };
     case 'task': return { type: 'agent.task', payload: { goal: pParts.join(' ') } };
@@ -53,20 +65,24 @@ function mapCommand(type: string, pParts: string[]): any {
       }
       return { type: 'wait', payload: { ms: Number(pParts[0]) || 1000 } };
     case 'annotate': return { type: 'page.annotate', payload: { noImage: pParts.includes('--no-image') } };
-    case 'extract': return { type: 'dom.extract', payload: { type: pParts[0]?.startsWith('--type') ? pParts[0].split('=')[1] : pParts[1] } };
+    case 'extract': return { type: 'dom.extract', payload: { type: pParts[0]?.startsWith('--type') ? pParts[0].split('=')[1] : (pParts[0] || pParts[1]) } };
     case 'visible-text': return { type: 'dom.visibleText', payload: {
-      textFilter: pParts.find(p => p.startsWith('--filter='))?.split('=').slice(1).join('='),
-      query: pParts.find(p => p.startsWith('--query='))?.split('=').slice(1).join('='),
-      limit: Number(pParts.find(p => p.startsWith('--limit='))?.split('=')[1]) || undefined,
+      textFilter: optValue(pParts, '--filter'),
+      filterAny: csvTerms(optValue(pParts, '--filter-any')),
+      filterLines: pParts.includes('--filter-lines'),
+      query: optValue(pParts, '--query'),
+      limit: Number(optValue(pParts, '--limit')) || undefined,
     } };
     case 'status': return { type: 'browser.status', payload: {} };
     case 'screenshot': return { type: 'vision.screenshot', payload: { fullPage: pParts.includes('--full-page') } };
     case 'scroll': return { type: 'agent.scroll', payload: { direction: Number(pParts[0]) < 0 ? 'up' : 'down', amount: Math.abs(Number(pParts[0]) || 600) } };
     case 'discover': return { type: 'agent.discoverScroll', payload: { steps: Number(pParts[0]) || 5, amount: Number(pParts[1]) || 650 } };
     case 'scan': return { type: 'human.scan', payload: {
-      steps: Number(pParts.find(p => p.startsWith('--steps='))?.split('=')[1]) || Number(pParts[0]) || 4,
-      amount: Number(pParts.find(p => p.startsWith('--amount='))?.split('=')[1]) || undefined,
-      textFilter: pParts.find(p => p.startsWith('--filter='))?.split('=').slice(1).join('='),
+      steps: Number(optValue(pParts, '--steps')) || Number(pParts[0]) || 4,
+      amount: Number(optValue(pParts, '--amount')) || undefined,
+      textFilter: optValue(pParts, '--filter'),
+      filterAny: csvTerms(optValue(pParts, '--filter-any')),
+      filterLines: pParts.includes('--filter-lines'),
     } };
     case 'idle': return { type: 'human.idle', payload: { durationMs: Number(pParts[0]) || undefined } };
     case 'jitter': return { type: 'human.jitter', payload: { radius: Number(pParts[0]) || undefined, moves: Number(pParts[1]) || undefined } };
@@ -76,7 +92,16 @@ function mapCommand(type: string, pParts: string[]): any {
     case 'back': return { type: 'human.goBack', payload: {} };
     case 'forward': return { type: 'human.goForward', payload: {} };
     case 'find-text': return { type: 'human.findText', payload: { text: pParts.join(' ') } };
-    case 'click-text': return { type: 'human.clickText', payload: { text: pParts.join(' ') } };
+    case 'click-text': {
+      const timeoutMs = Number(optValue(pParts, '--timeout-ms')) || 15000;
+      const maxScrolls = Number(optValue(pParts, '--max-scrolls'));
+      const text = pParts.filter((p, i) => {
+        if (p.startsWith('--timeout-ms=') || p.startsWith('--max-scrolls=')) return false;
+        if ((pParts[i - 1] === '--timeout-ms') || (pParts[i - 1] === '--max-scrolls')) return false;
+        return p !== '--timeout-ms' && p !== '--max-scrolls';
+      }).join(' ');
+      return { type: 'human.clickText', payload: { text, timeoutMs, maxScrolls: Number.isFinite(maxScrolls) ? maxScrolls : undefined } };
+    }
     case 'timing': {
       const action = pParts[0] ?? 'get';
       if (action === 'get') return { type: 'human.timing.get', payload: {} };

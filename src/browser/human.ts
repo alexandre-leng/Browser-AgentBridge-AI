@@ -157,7 +157,8 @@ async function paintCursor(page: Page, x: number, y: number, clicking = false) {
 
 export async function flashClick(page: Page, x = _curX, y = _curY) {
   await paintCursor(page, x, y, true);
-  await sleep(120 * demoSlowdown());
+  // 60ms green flash (was 120ms) — still perceptible, doesn't block the next action.
+  await sleep(60 * demoSlowdown());
   await paintCursor(page, x, y, false);
 }
 
@@ -171,23 +172,57 @@ export async function humanMove(page: Page, toX: number, toY: number, fromX = _c
   const cx2 = fromX + (toX - fromX) * 0.7 + rand(-arc, arc);
   const cy2 = fromY + (toY - fromY) * 0.7 + rand(-arc, arc);
   for (let i = 1; i <= steps; i++) {
-    const t = i / steps;
+    // Smoothstep: ease-in-out — humans accelerate to mid-trajectory, then decelerate.
+    // Linear t was a strong bot-detection signal (constant velocity).
+    const tLin = i / steps;
+    const t = tLin * tLin * (3 - 2 * tLin);
     const x = bezier(t, fromX, cx1, cx2, toX) + rand(-0.5, 0.5);
     const y = bezier(t, fromY, cy1, cy2, toY) + rand(-0.5, 0.5);
     await page.mouse.move(x, y);
-    await paintCursor(page, x, y);
-    await sleep(rand(8, 18) * demoSlowdown());
+    // Throttle the visible cursor paint to every 3rd step. The CSS has
+    // `transition: transform 40ms linear`, so the browser interpolates between
+    // updates — saves ~2/3 of the IPC round-trips with no visual difference.
+    if (i % 3 === 0 || i === steps) await paintCursor(page, x, y);
+    // Fast-typer profile: 4-10ms per step (was 8-18). A real human moves the
+    // cursor at 600-1200 px/s; with ~7px steps that's 6-12ms — match it.
+    await sleep(rand(4, 10) * demoSlowdown());
   }
   _curX = toX;
   _curY = toY;
   await paintCursor(page, toX, toY);
 }
 
+// QWERTY neighbor map — used to simulate occasional typos. Typing the wrong
+// neighbor key, then backspacing, is one of the strongest "human" signals
+// against keystroke-pattern bot detectors (which see uniform timing + zero errors).
+const KEYBOARD_NEIGHBORS: Record<string, string> = {
+  q: 'w', w: 'e', e: 'r', r: 't', t: 'y', y: 'u', u: 'i', i: 'o', o: 'p',
+  a: 's', s: 'd', d: 'f', f: 'g', g: 'h', h: 'j', j: 'k', k: 'l',
+  z: 'x', x: 'c', c: 'v', v: 'b', b: 'n', n: 'm',
+};
+function neighborKey(ch: string): string {
+  const lower = ch.toLowerCase();
+  const neighbor = KEYBOARD_NEIGHBORS[lower];
+  if (!neighbor) return ch;
+  return ch === lower ? neighbor : neighbor.toUpperCase();
+}
+
 export async function humanType(page: Page, text: string) {
   for (const ch of text) {
+    // Fast-typer profile (90-110 WPM): bursts of quick keystrokes with rare
+    // corrections. ~1.5% typo rate (down from 2.5%) — too many corrections look
+    // like a struggling user, not a confident one.
+    if (Math.random() < 0.015 && /[a-z]/i.test(ch)) {
+      await page.keyboard.type(neighborKey(ch), { delay: 0 });
+      await sleep(rand(60, 140));
+      await page.keyboard.press('Backspace');
+      await sleep(rand(40, 90));
+    }
     await page.keyboard.type(ch, { delay: 0 });
-    await sleep(rand(40, 160));
-    if (Math.random() < 0.03) await sleep(rand(200, 500));
+    // 18-70 ms per char ≈ 90-110 WPM (fast typer). Was 40-160 ms (40-60 WPM).
+    await sleep(rand(18, 70));
+    // Occasional micro-thinking pause — kept rare so it doesn't break rhythm.
+    if (Math.random() < 0.02) await sleep(rand(120, 280));
   }
 }
 
@@ -198,12 +233,22 @@ export async function humanScroll(page: Page, deltaY: number, deltaX = 0) {
   const targetY = viewport ? Math.round(viewport.height * rand(0.48, 0.72)) : _curY;
   if (Math.hypot(targetX - _curX, targetY - _curY) > 80) await humanMove(page, targetX, targetY);
   const steps = randInt(7, 13);
+  // Wheel inertia: real mouse-wheel scrolls front-load the delta then taper off
+  // (exponential decay). Constant deltaY/steps was a bot signal.
+  const weights = Array.from({ length: steps }, (_, i) => Math.exp(-1.2 * (i / steps)));
+  const sumW = weights.reduce((a, b) => a + b, 0);
   for (let i = 0; i < steps; i++) {
-    const dx = deltaX !== 0 ? deltaX / steps + rand(-2, 2) : 0;
-    const dy = deltaY !== 0 ? deltaY / steps + rand(-10, 10) : 0;
+    const w = weights[i] / sumW;
+    const dx = deltaX !== 0 ? deltaX * w + rand(-2, 2) : 0;
+    const dy = deltaY !== 0 ? deltaY * w + rand(-8, 8) : 0;
     await page.mouse.wheel(dx, dy);
-    await paintCursor(page, _curX + rand(-4, 4), _curY + rand(-4, 4));
-    await sleep(rand(120, 260) * demoSlowdown());
+    // Same throttle logic as humanMove: paint every other step.
+    if (i % 2 === 0 || i === steps - 1) {
+      await paintCursor(page, _curX + rand(-4, 4), _curY + rand(-4, 4));
+    }
+    // Fast scroll: 50-130 ms between wheel impulses (was 120-260). A real wheel
+    // flick fires ~5-10 events in under a second — match that rhythm.
+    await sleep(rand(50, 130) * demoSlowdown());
   }
 }
 
@@ -212,7 +257,8 @@ export async function humanJitter(page: Page, radius = 18, moves = 4) {
   const safeMoves = Math.max(1, Math.min(Math.round(moves), 20));
   for (let i = 0; i < safeMoves; i++) {
     await humanMove(page, _curX + rand(-radius, radius), _curY + rand(-radius, radius));
-    await sleep(rand(70, 220) * demoSlowdown());
+    // Fast: 30-110 ms between micro-jitter (was 70-220).
+    await sleep(rand(30, 110) * demoSlowdown());
   }
 }
 
@@ -242,11 +288,14 @@ export async function humanSkim(page: Page, steps = 4, amount = 420) {
 }
 
 export async function humanPreClick(page: Page, x: number, y: number) {
+  // Confident-user profile: target acquisition without dwelling.
+  // Old: 270-880 ms total dwell + 45% jitter chance.
+  // New:  60-220 ms total dwell + 15% jitter chance — "tac tac tac" rhythm.
   await humanMove(page, x + rand(-8, 8), y + rand(-5, 5));
-  await humanPause(180, 620);
-  if (Math.random() < 0.45) await humanJitter(page, randInt(3, 10), randInt(1, 3));
+  await humanPause(40, 140);
+  if (Math.random() < 0.15) await humanJitter(page, randInt(3, 8), 1);
   await humanMove(page, x, y);
-  await humanPause(90, 260);
+  await humanPause(20, 80);
 }
 
 export function estimateHumanConsultationMs(text: string, options: { focused?: boolean } = {}) {
@@ -298,6 +347,10 @@ export async function humanConsult(
   return durationMs;
 }
 
-export async function humanPause(minMs = 300, maxMs = 900) {
+/**
+ * Default pause between actions. Fast-typer profile: 100-300 ms instead of
+ * 300-900 ms. Callers that explicitly pass min/max keep their own ranges.
+ */
+export async function humanPause(minMs = 100, maxMs = 300) {
   await sleep(rand(minMs, maxMs));
 }

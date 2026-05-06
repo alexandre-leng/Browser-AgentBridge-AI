@@ -248,13 +248,13 @@ exec: {
 | `wait --for text <text>` | Wait until text appears | `bridge.cmd wait --for text "Results"` |
 | `extract <type>` | Extract structured data | `bridge.cmd extract article` |
 | `summary` | Lightweight page summary | `bridge.cmd summary` |
-| `visible-text --filter=...` | Extract visible text elements | `bridge.cmd visible-text --filter="Numéro\|06\|Adresse"` |
+| `visible-text --filter=...` | Extract visible text elements | `bridge.cmd visible-text --filter-any=Numéro,06,Adresse --filter-lines` |
 | `run "cmd1" "cmd2" ...` | Execute multiple commands in batch | See §6 |
 
 ### Human-like CLI commands
 | Command | Purpose | Example |
 |---------|---------|---------|
-| `scan --steps=N --filter=X` | Read visible text, scroll slowly | `bridge.cmd scan --steps=4 --filter="Restaurant\|Adresse"` |
+| `scan --steps=N --filter=X` | Read visible text, scroll slowly | `bridge.cmd scan --steps=4 --filter-any=Restaurant,Adresse` |
 | `find-text "..."` | Search text, scroll if needed | `bridge.cmd find-text "Le Ramus"` |
 | `click-text "..."` | Find text + click (even non-button) | `bridge.cmd click-text "Le Ramus"` |
 | `read` | Focused reading with human pauses | `bridge.cmd read` |
@@ -291,7 +291,7 @@ Returns **all step results** by default — complete trace:
 
 ## 7. JSON-RPC Approach (WebSocket)
 
-For advanced, precise, multi-step workflows. **79 commands total** across 14 categories. Full reference in `docs/api.md` (auto-generated in bridge folder).
+For advanced, precise, multi-step workflows. **80 commands total** across 14 categories. Full reference in `docs/api.md` (auto-generated in bridge folder).
 
 ### Protocol
 
@@ -319,7 +319,7 @@ For advanced, precise, multi-step workflows. **79 commands total** across 14 cat
 | `agent.summary` | Lightweight: URL, title, top elements | `{}` |
 | `agent.tree` | Full ARIA accessibility tree | `{}` |
 | `vision.screenshot` | Raw screenshot as base64 | `{}` |
-| `dom.visibleText` | Extract visible text with filters | `{query: ".css", textFilter: "Numéro\|06", limit: 100}` |
+| `dom.visibleText` | Extract visible text with filters | `{query: ".css", filterAny: ["Numéro", "06"], filterLines: true, limit: 100}` |
 
 #### 🧭 NAVIGATE — Move around
 | Command | Purpose | Payload |
@@ -378,10 +378,10 @@ These commands make automation look like a real person. Use them on sensitive si
 | Command | Purpose | Payload |
 |---------|---------|---------|
 | `human.read` | Read visible text with human timing | `{focused: true}` |
-| `human.scan` | Scroll + read progressively | `{steps: 4, textFilter: "..."}` |
+| `human.scan` | Scroll + read progressively | `{steps: 4, filterAny: ["Restaurant", "Adresse"], filterLines: true}` |
 | `human.skim` | Quick page skim with backscroll | `{steps: 4, scrollPx: 420}` |
-| `human.findText` | Search visible text, scroll if needed | `{text: "Le Ramus"}` |
-| `human.clickText` | Find text and click (even non-button) | `{text: "Le Ramus"}` |
+| `human.findText` | Search visible text, scroll if needed | `{text: "Le Ramus", timeoutMs: 8000}` |
+| `human.clickText` | Find text and click (even non-button) | `{text: "Le Ramus", timeoutMs: 15000}` |
 | `human.explore` | Explore page content | — |
 | `human.idle` | Mouse movement + reading pauses | `{ms: 2500}` |
 | `human.jitter` | Small hesitation movements | `{radius: 18, count: 4}` |
@@ -432,10 +432,10 @@ Controls consultation speeds: reading, scanning, re-reading. Mouse/keyboard have
 #### 📊 DATA — Extract structured content
 | Command | Purpose | Payload |
 |---------|---------|---------|
-| `dom.extract` | Smart extraction by type | `{type: "search-results\|form\|article\|table\|google-maps"}` |
+| `dom.extract` | Smart extraction by type | `{type: "search-results\|form\|article\|table\|google-maps\|listings"}` |
 | `dom.html` | Inner HTML of selector | `{selector: "body"}` |
 | `dom.inspect` | Debug element by ref | `{ref: 7}` |
-| `dom.visibleText` | Visible text with filters | `{textFilter: "...", limit: 100}` |
+| `dom.visibleText` | Visible text with filters | `{textFilter: "...", filterAny: ["a", "b"], filterLines: true, limit: 100}` |
 
 #### 🍪 STATE — Cookies & Viewport
 | Command | Purpose | Payload |
@@ -581,7 +581,7 @@ bridge.cmd run "navigate https://site.com" "scroll 800" "extract article"
 {"id":"t1","type":"human.timing.get","payload":{}}
 {"id":"t2","type":"human.timing.set","payload":{"consultSpeed":1.6,"minFocusedMs":4000}}
 {"id":"a1","type":"human.read","payload":{"focused":true}}
-{"id":"a2","type":"human.scan","payload":{"steps":4,"textFilter":"Restaurant|Adresse"}}
+{"id":"a2","type":"human.scan","payload":{"steps":4,"filterAny":["Restaurant","Adresse"]}}
 {"id":"c1","type":"human.antispam.check","payload":{}}
 ```
 
@@ -589,19 +589,30 @@ bridge.cmd run "navigate https://site.com" "scroll 800" "extract article"
 ```bash
 bridge.cmd timing set consultSpeed=1.6 minFocusedMs=4000
 bridge.cmd read
-bridge.cmd scan --steps=4 --filter="Restaurant|Adresse"
+bridge.cmd scan --steps=4 --filter-any=Restaurant,Adresse
 ```
 
 ### G. Click Text Without Known Ref (text-based clicking)
 ```bash
 bridge.cmd click-text "Ajouter au panier"
+bridge.cmd click-text "Rechercher dans cette zone" --timeout-ms=15000
 ```
 
 ```json
 {"id":"g1","type":"human.clickText","payload":{"text":"Ajouter au panier"}}
 ```
 
-### H. Resilient Workflow (Complete)
+### H. Windows / PowerShell Filtering
+Prefer comma-separated filters on Windows:
+
+```powershell
+.\bridge.cmd visible-text --filter-any=Formation,IA,Marseille --filter-lines
+.\bridge.cmd scan --steps=4 --filter-any=Restaurant,Adresse
+```
+
+`--filter-any=a,b,c` matches any term without relying on `|`, which `cmd.exe` can treat as a pipeline before Node receives the argument. `--filter-lines` applies filtering after extraction and returns only matching lines. Regex filters still work with `--filter="Formation|IA|Marseille"` in shells that preserve the pipe correctly.
+
+### I. Resilient Workflow (Complete)
 ```bash
 # Step 1: Navigate, wait, annotate (fast)
 bridge.cmd run "navigate https://duckduckgo.com/?q=formalibre" "wait 3000" "annotate --no-image"
@@ -613,7 +624,7 @@ bridge.cmd click <ref>
 bridge.cmd run "wait 4000" "extract article"
 ```
 
-### I. From Zero: First-Time Setup → First Action
+### J. From Zero: First-Time Setup → First Action
 ```bash
 # Si le bridge n'est pas lancé, le lancer d'abord dans un terminal séparé :
 cd openclaw-browser-bridge && npm start
@@ -787,7 +798,7 @@ Propose edits:
 
 ## 17. Complete Reference
 
-For the exhaustive list of all 79 commands, exact payloads, and return types:
+For the exhaustive list of all 80 commands, exact payloads, and return types:
 - **`docs/api.md`** (auto-generated) in the bridge project folder
 
 For the human-oriented workflow guide:

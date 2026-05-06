@@ -10,6 +10,21 @@ export const STEALTH_SCRIPT = /* js */ `
 (function () {
   'use strict';
 
+  // ── 0. esbuild __name polyfill ────────────────────────────────────────────
+  // tsx/esbuild compiles Node-side code with --keep-names, which wraps every
+  // named inner function with \`__name(fn, "name")\` for stack-trace fidelity.
+  // When a callback containing nested named helpers (e.g. inside collectElements)
+  // is sent to page.evaluate(), the call expression travels with it but the
+  // browser has no __name → "ReferenceError: __name is not defined".
+  // Defining a no-op polyfill here makes every evaluate body work transparently.
+  if (typeof globalThis.__name !== 'function') {
+    Object.defineProperty(globalThis, '__name', {
+      value: function (fn) { return fn; },
+      writable: true,
+      configurable: true,
+    });
+  }
+
   // ── 1. navigator.webdriver ────────────────────────────────────────────────
   try {
     Object.defineProperty(navigator, 'webdriver', {

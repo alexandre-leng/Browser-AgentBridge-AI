@@ -76,9 +76,11 @@ Designed specifically for LLMs (Claude, GPT, Gemini).
 - **`page.annotate`**: Generates a numbered screenshot + structured element list.
 - **`agent.click {ref: N}`**: Clicks the element with ID `N` using human-like motion.
 - **`agent.type {ref: N, text: "..."}`**: Focuses and types with realistic delays.
-- **`dom.extract {type: "search-results"|"form"|"table"}`**: Returns clean JSON instead of a wall of text.
+- **`dom.extract {type: "search-results"|"form"|"table"|"google-maps"|"listings"}`**: Returns clean JSON instead of a wall of text.
 - **`dom.extract {schema}`**: Extracts typed fields from CSS selectors.
 - **`dom.extract {schema, llm: true}`**: Produces a strict JSON extraction prompt for an external LLM client.
+- **`dom.visibleText {filterAny, filterLines}`**: Extracts visible text with Windows-safe comma filters.
+- **`human.clickText {text, timeoutMs}`**: Finds visible text, logs each stage, and falls back to ref-clicking when coordinate clicks fail.
 - **`human.timing.*`**: Lets an agent read, tune, and reset consultation timings while a session is running.
 - **`human.antispam.check`**: Returns a structured anti-spam warning without throwing, so an agent can pause or hand off cleanly.
 
@@ -144,8 +146,170 @@ We take stability seriously. The bridge includes a comprehensive test suite powe
 ```bash
 npm test
 ```
-- ✅ **Resolver Integrity**: Ensures XPath/CSS/Text detection is flawless.
+- ✅ **Resolver Integrity**: Ensures XPath/CSS/Text detection is flawless. Empty/undefined queries now throw an explicit error (`dom.click: requires query, selector or text`) instead of crashing.
 - ✅ **Human Dynamics**: Validates mouse movement physics and typing patterns.
+
+---
+
+## 👁️ Human Realism (`src/browser/human.ts`)
+
+OpenClaw's anti-detection isn't just stealth scripts — every interaction is shaped to match human motor patterns.
+
+| Aspect | Implementation |
+|---|---|
+| **Mouse trajectory** | Cubic Bézier with random arc, 24-90 steps adaptive to distance. Cursor position is tracked server-side, so each move starts from the real last position (no teleport from `(0,0)`). |
+| **Mouse velocity** | **Smoothstep easing** `t' = t²(3-2t)` — slow start, fast middle, slow end. Linear `t` was a strong bot signal (constant velocity). |
+| **Typing rhythm** | 40-160 ms per character, 3% chance of long pause (200-500 ms reflection). |
+| **Typos & correction** | ~2.5% chance of pressing a QWERTY-neighbor key, then `Backspace`, then the correct key. The strongest defeat for keystroke-pattern detectors. |
+| **Scroll inertia** | Wheel deltas follow exponential decay `e^(-1.2t)` — strong initial impulse then taper, mimicking real mouse-wheel physics. |
+| **Visible cursor** | Red dot (turns green during click) painted via injected `<div>` with CSS `transition: transform 40ms linear`. The browser interpolates between updates, so we throttle paints to 1-in-3 steps to save IPC round-trips with no visual difference. Disable with `BRIDGE_VISIBLE_CURSOR=0`. |
+
+Fine-tune at runtime:
+```jsonc
+{ "type": "human.timing.set", "payload": {
+  "consultSpeed": 1.4,
+  "minFocusedMs": 3000,
+  "feedbackIntervalMs": 800
+}}
+```
+
+---
+
+## 🛡️ Stealth & Anti-detection (`src/browser/stealth.ts`)
+
+Twelve patches injected via `addInitScript` before any page script executes:
+
+| # | Patch | Purpose |
+|---|---|---|
+| 1 | `navigator.webdriver` → `undefined` | Defeats the most basic check. |
+| 2 | `window.chrome` full object (`app`, `runtime`, `loadTimes`, `csi`) | Real Chrome has it — headless doesn't. |
+| 3 | `navigator.plugins` (5 PDF viewers) | Empty plugins array is a headless signal. |
+| 4 | `navigator.mimeTypes` | Coherent with plugins. |
+| 5 | `navigator.languages` → `['fr-FR', 'fr', 'en-US', 'en']` | Matches the `locale` Playwright contextOpt. |
+| 6 | `navigator.deviceMemory` → `8` | Default is missing in headless. |
+| 7 | `navigator.hardwareConcurrency` → `8` | Same. |
+| 8 | `Permissions.query` patched | `notifications` returns the real `Notification.permission` instead of leaking automation state. |
+| 9 | Canvas fingerprint noise | Imperceptible per-session noise on `toDataURL` / `toBlob` defeats exact-hash fingerprinting. |
+| 10 | WebGL `getParameter` | Returns `Google Inc. (Intel)` / `ANGLE Intel UHD Graphics 620 D3D11` for `UNMASKED_VENDOR_WEBGL` / `UNMASKED_RENDERER_WEBGL`. |
+| 11 | `outerWidth/outerHeight` | Cohérents avec `innerWidth + 16/88` if `0` (headless signal). |
+| 12 | Playwright globals | `__playwright`, `__pw_manual`, `__pwInitScripts` deleted. |
+
+For aggressive anti-bots (Google, Cloudflare): **always set `CHROME_PROFILE` to a real Chrome profile**. This is the strongest signal — the stealth script alone can't replicate cookie history, TLS/JA3 fingerprint, or browsing habits.
+
+---
+
+## 🧬 Multi-session
+
+Every WebSocket command accepts an optional `payload.sessionId`. The bridge routes via `AsyncLocalStorage` to an isolated Playwright context (separate cookies, tabs, storage):
+
+```jsonc
+{ "id": "1", "type": "session.create", "payload": { "sessionId": "alice" } }
+{ "id": "2", "type": "navigate",       "payload": { "sessionId": "alice", "url": "https://example.com" } }
+{ "id": "3", "type": "session.create", "payload": { "sessionId": "bob"   } }
+{ "id": "4", "type": "navigate",       "payload": { "sessionId": "bob",   "url": "https://other.com"   } }
+{ "id": "5", "type": "session.list" }
+```
+
+Commands without `sessionId` use a shared default context. The `BrowserController` keeps `Map<sessionId, Context>` and `Map<sessionId, Page>`.
+
+---
+
+## 📜 Complete command reference (~70)
+
+Grouped by handler module. All accept optional `payload.sessionId`.
+
+### Navigation (`handlers/navigation.ts`)
+`navigate { url, waitUntil? }` · `search { engine, query }` · `dom.goto { url }`
+
+### DOM semantic (`handlers/dom.ts`)
+Every handler accepts `query` / `selector` / `text` (universal selector: XPath, CSS, or natural description).
+
+`dom.click` · `dom.doubleClick` · `dom.hover` · `dom.type {value}` · `dom.press {key, waitForNavigation?}` · `dom.submit` · `dom.select {value}` · `dom.waitFor {state?, timeout?}` · `dom.html` · `dom.search {text}` · `dom.inspect` · `dom.scrollDown {amount?}` · `dom.scrollUp {amount?}` · `dom.fillForm {fields:[...]}`
+
+### Agent IA — Antigravity-style (`handlers/agent.ts`)
+`page.annotate { noImage? }` → `{ image, imageUrl, elements, url, title }`
+`agent.summary` · `agent.tree` · `agent.click {ref, double?, retry?}` · `agent.type {ref, text, clearFirst?}` · `agent.press {key, ref?}` → `{ key, navigated, url, title }` · `agent.scroll {direction, amount?, x?, y?}` · `agent.discoverScroll {steps?, annotate?}` · `agent.waitFor {text? | url?, timeout?}` · `agent.hover {ref}` · `agent.select {ref, option}`
+
+`ref` = numeric ID from last `page.annotate`, OR a natural description string (fuzzy match via Levenshtein, score ≥ 60).
+
+### Raw input — viewer takeover, no humanization (`handlers/input.ts`)
+`input.mouseMove {x, y}` · `input.mouseDown / input.mouseUp {x?, y?, button?}` · `input.wheel {x?, y?, deltaX?, deltaY?}` · `input.keyDown / input.keyUp {key}` · `input.text {text}` · `input.focus` · `viewport.set {width, height}`
+
+### Extraction (`handlers/extraction.ts`)
+`dom.extract {type?, schema?}` supports `search-results`, `form`, `article`, `table`, `google-maps`, and generic `listings`.
+`dom.visibleText {query?, textFilter?, filterAny?, filterLines?, limit?, includeHidden?}`
+
+Windows-safe CLI filtering:
+```powershell
+.\bridge.cmd visible-text --filter-any=Formation,IA,Marseille --filter-lines --limit=50
+.\bridge.cmd scan --steps=4 --filter-any=Restaurant,Adresse
+```
+
+Generic listing extraction:
+```bash
+.\bridge.cmd extract listings
+```
+
+### Human behavior (`handlers/special.ts`)
+`human.timing.get / human.timing.set / human.timing.reset` · `human.antispam.check` · `human.read {durationMs?}` · `human.explore {steps?}` · `human.idle {durationMs?}` · `human.jitter {radius?, moves?}` · `human.skim {steps?, amount?}` · `human.backtrack` · `human.focusCycle` · `human.goBack` · `human.goForward` · `human.scan {filterAny?, filterLines?}` · `human.findText {text, timeoutMs?, consultMs?}` · `human.clickText {text, timeoutMs?, maxScrolls?}`
+
+### Vision / Capture
+`vision.start {fps?, annotate?}` · `vision.stop` · `vision.screenshot` · `screenshot {format?, fullPage?}`
+
+### Sessions, tabs, cookies, traces (`handlers/session.ts`)
+`session.create {sessionId}` · `session.list` · `browser.status` · `browser.close` · `trace.list` · `trace.save` · `trace.artifacts` · `cookie.get` · `cookie.set` · `tab.list` · `tab.new` · `tab.close` · `tab.switch` · `ping`
+
+### Special (`handlers/special.ts`)
+`exec.script {code}` (gated by `BRIDGE_ALLOW_EXEC_SCRIPT=1`) · `wait {ms}` · `combo.searchAndClick {query, engine?}` · `agent.search` · `agent.task`
+
+---
+
+## ⚡ Performance optimizations (v3.2)
+
+| Hot path | Optimization | Gain |
+|---|---|---|
+| `annotateInteractive` | Overlay cleanup is fire-and-forget (auto-cleans on next call) | ~50 ms / call |
+| `humanMove` cursor paint | Throttled to 1-in-3 steps; CSS `transition: 40ms linear` interpolates | ~3× fewer IPC |
+| `humanScroll` cursor paint | Throttled to 1-in-2 steps | ~2× fewer IPC |
+| `vision.ts` CSS dimensions | Cached, invalidated on `framenavigated` | 1 IPC saved per frame × FPS |
+| `handlers/agent.ts` | Removed dynamic `await import('../human.js')` from `agent.scroll` and `agent.discoverScroll` | ~5 ms / call |
+| `accessibilityTree` | Early-stops in `evaluate`, returns `{items, total}` | ~50 ms on `agent.summary` |
+| `humanType` typos | Adds realism without measurable cost (Backspace + retype = ~300 ms when triggered ~2.5% of the time) | — |
+| `__name` polyfill in `agent.ts` and `server.ts` | Defends against `tsx`/esbuild helper leakage inside browser-side `evaluate` callbacks — unblocks `page.annotate {noImage:true}` even when init scripts did not run in the target frame | — |
+
+### Adaptive throttling (no more 12 s wasted on permissive sites)
+
+Older versions enforced a hard `BRIDGE_POLITE_MIN_DELAY_MS=12000` and a 2.5 s warm-up on **every** navigation. v3.2 makes both adaptive:
+
+- **Warm-up** is skipped if the same host was visited in the last 60 s (cookie banners and bot checks usually only fire on first contact).
+- **Polite delay** is `0 ms` for hosts that haven't shown an anti-bot signal. As soon as `assertNoAntiBot` detects a verification page, the offending host is automatically promoted to "aggressive" and gets the full `BRIDGE_POLITE_MIN_DELAY_MS` between subsequent navigations.
+
+Pre-seed known-aggressive hosts at startup:
+```bash
+BRIDGE_POLITE_FORCE_HOSTS=google.com,linkedin.com npm start
+```
+
+Disable politeness entirely for trusted environments (intranet, owned sites, test fixtures):
+```bash
+BRIDGE_POLITE_MODE=0 npm start
+```
+
+### Native batch handler
+
+`script.execute` validates payload schemas and supports `${stepN.path}` variable interpolation between steps — perfect for orchestrated flows but expensive. For independent commands (parallel scraping, mass page-annotates), use the lighter `batch`:
+
+```jsonc
+{ "type": "batch", "payload": {
+  "stopOnError": false,
+  "commands": [
+    { "type": "navigate",     "payload": { "url": "https://example.com" } },
+    { "type": "page.annotate" },
+    { "type": "agent.summary" }
+  ]
+}}
+```
+
+Returns `{ results: [{step, ok, type, result|error}, ...], durationMs, stepsExecuted }`. One WebSocket round-trip, no per-command overhead.
 
 ---
 

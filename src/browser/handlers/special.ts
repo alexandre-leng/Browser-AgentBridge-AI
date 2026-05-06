@@ -23,6 +23,7 @@ import { validate } from './validate.js';
 import { extractFrenchPhones } from './phone.js';
 import { assertExecAllowed } from '../security.js';
 import { politeGoto, assertNoAntiBot } from '../polite.js';
+import { annotateInteractive, getAgentElements } from '../agent.js';
 
 const COOKIE_SELECTORS = [
   '#L2AGLb', // Google
@@ -110,6 +111,39 @@ export function specialHandlers(ctx: HandlerContext): Record<string, Handler> {
         durationMs: Date.now() - t0,
         stepsExecuted: step
       };
+    },
+
+    /**
+     * Lightweight batch — execute N commands in a single WS round-trip.
+     *
+     * Cheaper than `script.execute` (no schema validation, no `${stepN.path}`
+     * variable interpolation, no rate-limit lookup per command). Use this for
+     * fast scraping pipelines where each command is independent. Use
+     * `script.execute` when you need to chain results between steps.
+     */
+    'batch': async ({ commands, stopOnError = false }: any) => {
+      if (!Array.isArray(commands) || commands.length === 0) {
+        throw new Error('batch: `commands` must be a non-empty array');
+      }
+      if (!ctx.dispatch) throw new Error('batch: dispatch not available');
+      const t0 = Date.now();
+      const results: any[] = [];
+      for (let i = 0; i < commands.length; i++) {
+        const cmd = commands[i];
+        if (!cmd?.type || typeof cmd.type !== 'string') {
+          results.push({ step: i, ok: false, error: 'missing or invalid `type`' });
+          if (stopOnError) break;
+          continue;
+        }
+        try {
+          const result = await ctx.dispatch(cmd.type, cmd.payload ?? {});
+          results.push({ step: i, ok: true, type: cmd.type, result });
+        } catch (err: any) {
+          results.push({ step: i, ok: false, type: cmd.type, error: err?.message ?? String(err) });
+          if (stopOnError) break;
+        }
+      }
+      return { results, durationMs: Date.now() - t0, stepsExecuted: results.length };
     },
 
     'wait': async ({ ms }: any) => {
@@ -338,7 +372,7 @@ export function specialHandlers(ctx: HandlerContext): Record<string, Handler> {
       return { ok: true, url: page.url(), title: await page.title() };
     },
 
-    'human.scan': async ({ steps = 4, amount = 520, textFilter, limitPerStep = 40 }: any = {}) => {
+    'human.scan': async ({ steps = 4, amount = 520, textFilter, filterAny, filterLines, limitPerStep = 40 }: any = {}) => {
       if (!ctx.dispatch) throw new Error('human.scan requires dispatcher');
       const page = await ctx.p();
       const snapshots = [];
@@ -347,6 +381,8 @@ export function specialHandlers(ctx: HandlerContext): Record<string, Handler> {
         await assertNoAntiBot(page);
         const visible = await ctx.dispatch('dom.visibleText', {
           textFilter,
+          filterAny,
+          filterLines,
           limit: Math.max(1, Math.min(Number(limitPerStep) || 40, 200)),
         });
         snapshots.push({
@@ -378,12 +414,18 @@ export function specialHandlers(ctx: HandlerContext): Record<string, Handler> {
       return { ok: true, snapshots };
     },
 
-    'human.findText': async ({ text, exact = false, maxScrolls = 4 }: any) => {
+    'human.findText': async ({ text, exact = false, maxScrolls = 4, consultMs = 0, timeoutMs = 8000 }: any) => {
       if (!text) throw new Error('human.findText: text is required');
       const page = await ctx.p();
       const needle = String(text);
       const safeScrolls = Math.max(0, Math.min(Number(maxScrolls) || 0, 20));
+      // Hard global timeout so the call never gets killed by a parent SIGKILL.
+      // Was uncapped + `humanConsult` could spend up to 18-45 s in "hit-review".
+      const deadline = Date.now() + Math.max(2000, Math.min(Number(timeoutMs) || 8000, 30_000));
       for (let attempt = 0; attempt <= safeScrolls; attempt++) {
+        if (Date.now() > deadline) {
+          return { found: false, hits: [], reason: 'timeout', attempt };
+        }
         await assertNoAntiBot(page);
         const hits = await page.evaluate(
           ({ needle, exact }) => {
@@ -417,10 +459,16 @@ export function specialHandlers(ctx: HandlerContext): Record<string, Handler> {
           { needle, exact },
         );
         if (hits.length) {
-          await humanConsult(page, hits.map((hit: any) => hit.text).join(' '), {
-            reason: 'human.findText.hit-review',
-            onFeedback: (event) => humanFeedback(ctx, event),
-          });
+          // hit-review: short glance instead of full humanConsult (which used to
+          // spend up to 18-45 s reading). Caller can pass consultMs > 0 to opt
+          // back into a long pause; default 0 = act immediately.
+          const safeConsult = Math.max(0, Math.min(Number(consultMs) || 0, 5000));
+          if (safeConsult > 0) {
+            humanFeedback(ctx, { phase: 'consulting', reason: 'human.findText.hit-review', durationMs: safeConsult });
+            await sleep(safeConsult);
+          } else {
+            await humanPause(120, 280);
+          }
           return { found: true, attempt, hits };
         }
         if (attempt < safeScrolls) {
@@ -432,26 +480,49 @@ export function specialHandlers(ctx: HandlerContext): Record<string, Handler> {
             timing: getHumanTimingProfile(),
           });
           await humanScroll(page, 520);
-          await humanPause(900, 2200);
+          // Tighter inter-scroll wait (was 900-2200).
+          await humanPause(250, 700);
         }
       }
       return { found: false, hits: [] };
     },
 
-    'human.clickText': async ({ text, exact = false, maxScrolls = 4 }: any) => {
+    'human.clickText': async ({ text, exact = false, maxScrolls = 4, timeoutMs = 8000 }: any) => {
       if (!ctx.dispatch) throw new Error('human.clickText requires dispatcher');
       const page = await ctx.p();
-      const found = await ctx.dispatch('human.findText', { text, exact, maxScrolls });
-      if (!found.found || !found.hits?.length) throw new Error(`human.clickText: visible text not found: ${text}`);
+      const safeTimeout = Math.max(2000, Math.min(Number(timeoutMs) || 15000, 30_000));
+      const startedAt = Date.now();
+      humanFeedback(ctx, { phase: 'click-text.finding', text, timeoutMs: safeTimeout });
+      const found = await ctx.dispatch('human.findText', { text, exact, maxScrolls, timeoutMs: safeTimeout, consultMs: 0 });
+      if (!found.found || !found.hits?.length) {
+        const reason = found.reason === 'timeout' ? ' (timeout)' : '';
+        throw new Error(`human.clickText: visible text not found${reason}: ${text}`);
+      }
       const hit = found.hits[0];
       const x = hit.box.x + Math.round(hit.box.w / 2);
       const y = hit.box.y + Math.round(Math.min(hit.box.h / 2, 24));
-      await humanPreClick(page, x, y);
-      await page.mouse.click(x, y, { delay: randInt(60, 170) });
-      await flashClick(page, x, y);
-      await humanPause(700, 1400);
-      await assertNoAntiBot(page);
-      return { clicked: hit.text, x, y, url: page.url(), title: await page.title() };
+      try {
+        humanFeedback(ctx, { phase: 'click-text.coordinates', x, y, elapsedMs: Date.now() - startedAt });
+        await humanPreClick(page, x, y);
+        humanFeedback(ctx, { phase: 'click-text.clicking', x, y, elapsedMs: Date.now() - startedAt });
+        await page.mouse.click(x, y, { delay: randInt(20, 60) });
+        await flashClick(page, x, y);
+        await humanPause(120, 350);
+        await assertNoAntiBot(page);
+        return { clicked: hit.text, x, y, url: page.url(), title: await page.title(), method: 'coordinates' };
+      } catch (err: any) {
+        humanFeedback(ctx, { phase: 'click-text.coordinate-failed', error: err?.message ?? String(err), elapsedMs: Date.now() - startedAt });
+        await annotateInteractive(page);
+        const q = String(text).toLowerCase();
+        const ref = getAgentElements().find((el) => {
+          const hay = `${el.name} ${el.role}`.toLowerCase();
+          return exact ? hay.trim() === q : hay.includes(q);
+        });
+        if (!ref) throw err;
+        humanFeedback(ctx, { phase: 'click-text.fallback-ref', ref: ref.id, elapsedMs: Date.now() - startedAt });
+        const result = await ctx.dispatch('agent.click', { ref: ref.id, retry: false });
+        return { ...result, method: 'agent.click.fallback' };
+      }
     },
 
     // --- Vision ---

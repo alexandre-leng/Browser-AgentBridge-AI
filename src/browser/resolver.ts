@@ -21,6 +21,11 @@ export function detectKind(q: any): 'xpath' | 'css' | 'text' {
 }
 
 export function resolve(page: Page, query: Query): Locator {
+  // detectKind throws on falsy input; this guard keeps replace() safe even if the
+  // signature is bypassed (any-typed callers).
+  if (typeof query !== 'string' || !query) {
+    throw new Error('resolver: query is required (non-empty string)');
+  }
   const kind = detectKind(query);
   if (kind === 'xpath') return page.locator(query.replace(/^xpath=/, ''));
   if (kind === 'css') return page.locator(query.replace(/^css=/, ''));

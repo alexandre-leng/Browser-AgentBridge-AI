@@ -16,10 +16,11 @@ export function domHandlers(ctx: HandlerContext): Record<string, Handler> {
     'dom.click': async ({ query, selector, text }) => {
       const page = await ctx.p();
       const q = query ?? selector ?? text;
+      if (!q) throw new Error('dom.click: requires `query`, `selector` or `text`');
       const { x, y } = await centerOf(page, q);
       await humanPreClick(page, x, y);
-      await sleep(rand(50, 150));
-      await page.mouse.click(x, y, { delay: randInt(40, 120) });
+      await sleep(rand(15, 60));
+      await page.mouse.click(x, y, { delay: randInt(15, 60) });
       await flashClick(page, x, y);
       await assertNoAntiBot(page);
       return { clicked: q, x, y };
@@ -27,7 +28,9 @@ export function domHandlers(ctx: HandlerContext): Record<string, Handler> {
 
     'dom.doubleClick': async ({ query, selector, text }) => {
       const page = await ctx.p();
-      const { x, y } = await centerOf(page, query ?? selector ?? text);
+      const q = query ?? selector ?? text;
+      if (!q) throw new Error('dom.doubleClick: requires `query`, `selector` or `text`');
+      const { x, y } = await centerOf(page, q);
       await humanPreClick(page, x, y);
       await page.mouse.dblclick(x, y);
       await flashClick(page, x, y);
@@ -37,7 +40,9 @@ export function domHandlers(ctx: HandlerContext): Record<string, Handler> {
 
     'dom.hover': async ({ query, selector, text }) => {
       const page = await ctx.p();
-      const { x, y } = await centerOf(page, query ?? selector ?? text);
+      const q = query ?? selector ?? text;
+      if (!q) throw new Error('dom.hover: requires `query`, `selector` or `text`');
+      const { x, y } = await centerOf(page, q);
       await humanMove(page, x, y);
       return { x, y };
     },
@@ -51,7 +56,7 @@ export function domHandlers(ctx: HandlerContext): Record<string, Handler> {
         await loc.click();
         const box = await loc.boundingBox().catch(() => null);
         if (box) await flashClick(page, box.x + box.width / 2, box.y + box.height / 2);
-        await humanPause(100, 300);
+        await humanPause(40, 120);
       }
       await humanType(page, val);
       return { typed: val.length };
@@ -85,14 +90,18 @@ export function domHandlers(ctx: HandlerContext): Record<string, Handler> {
 
     'dom.select': async ({ query, selector, text, value }) => {
       const page = await ctx.p();
-      const loc = await resolveVisible(page, query ?? selector ?? text);
+      const q = query ?? selector ?? text;
+      if (!q) throw new Error('dom.select: requires `query`, `selector` or `text`');
+      const loc = await resolveVisible(page, q);
       const res = await loc.selectOption(value);
       return { selected: res };
     },
 
     'dom.waitFor': async ({ query, selector, text, state = 'visible', timeout = 10000 }) => {
       const page = await ctx.p();
-      await resolve(page, query ?? selector ?? text).waitFor({ state, timeout });
+      const q = query ?? selector ?? text;
+      if (!q) throw new Error('dom.waitFor: requires `query`, `selector` or `text`');
+      await resolve(page, q).waitFor({ state, timeout });
       return { ok: true };
     },
 
@@ -145,11 +154,16 @@ export function domHandlers(ctx: HandlerContext): Record<string, Handler> {
 
     'dom.fillForm': async ({ fields }) => {
       const page = await ctx.p();
+      if (!Array.isArray(fields) || fields.length === 0) {
+        throw new Error('dom.fillForm: `fields` must be a non-empty array');
+      }
       for (const { query, selector, text, value } of fields) {
-        const loc = await resolveVisible(page, query ?? selector ?? text);
+        const q = query ?? selector ?? text;
+        if (!q) throw new Error('dom.fillForm: each field requires `query`, `selector` or `text`');
+        const loc = await resolveVisible(page, q);
         await loc.click();
         await humanType(page, String(value));
-        await humanPause(150, 400);
+        await humanPause(60, 180);
       }
       return { filled: fields.length };
     },

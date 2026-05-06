@@ -1,7 +1,7 @@
 # OpenClaw Browser Bridge — Full Technical Reference
 
 > **Version**: 3.2.0
-> **Last Updated**: April 29, 2026
+> **Last Updated**: May 5, 2026
 
 The OpenClaw Browser Bridge is a high-performance automation layer that bridges the gap between AI Agents and the Web. It focuses on **precision**, **human-like interaction**, and **structured data extraction**.
 
@@ -49,6 +49,7 @@ All commands are sent as JSON over WebSocket to `/ws/browser-bridge`.
 | Command | Payload | Description |
 | :--- | :--- | :--- |
 | `page.annotate` | `{}` | Captures a screenshot with numbered overlays and returns the element tree. |
+| `page.annotate` | `{noImage: true}` | Returns refs and metadata without embedding the screenshot payload. |
 | `vision.start` | `{fps: number, annotate?: boolean}` | Starts a real-time frame stream (broadcasted to all clients). |
 | `vision.stop` | `{}` | Stops the frame stream. |
 | `screenshot` | `{format?: 'png'\|'jpg', fullPage?: boolean}` | Captures a standard screenshot. |
@@ -63,6 +64,27 @@ All commands are sent as JSON over WebSocket to `/ws/browser-bridge`.
 | `table` | Parses tabular data into a 2D array. |
 | `article` | Extracts the main title and text body (cleaning up ads/nav). |
 | `google-maps` | Specialized extractor for local business listings and maps. |
+| `listings` | Generic structured listing extractor for maps, directories, yellow pages, and result cards. |
+
+`listings` returns:
+
+```json
+{
+  "type": "listings",
+  "listings": [
+    {
+      "name": "Ottho - Formation No Code et IA",
+      "rating": 5,
+      "reviews": 186,
+      "address": "11 Rue Montgrand, Marseille",
+      "phone": "07 57 59 77 84",
+      "website": "https://...",
+      "hours": "Ouvert · Ferme à 18:00",
+      "summary": "..."
+    }
+  ]
+}
+```
 
 ### ⌨️ Raw Input Module (`input.*`)
 *Low-latency primitives used by the Viewer for manual takeover.*
@@ -80,8 +102,9 @@ All commands are sent as JSON over WebSocket to `/ws/browser-bridge`.
 | Command | Payload | Description |
 | :--- | :--- | :--- |
 | `human.read` | `{durationMs?: number, focused?: boolean}` | Reads the current page with text-size-based pauses. |
-| `human.scan` | `{steps?: number, amount?: number, textFilter?: string}` | Reads visible text, scrolls, and repeats with feedback. |
-| `human.findText` | `{text: string, exact?: boolean, maxScrolls?: number}` | Searches visible text with human-paced review. |
+| `human.scan` | `{steps?: number, amount?: number, textFilter?: string, filterAny?: string[], filterLines?: boolean}` | Reads visible text, scrolls, and repeats with feedback. |
+| `human.findText` | `{text: string, exact?: boolean, maxScrolls?: number, timeoutMs?: number, consultMs?: number}` | Searches visible text with a bounded timeout. |
+| `human.clickText` | `{text: string, exact?: boolean, maxScrolls?: number, timeoutMs?: number}` | Finds visible text, clicks it, logs the stage, and falls back to `agent.click` when possible. |
 | `human.timing.get` | `{}` | Returns the active consultation timing profile. |
 | `human.timing.set` | `{consultSpeed?: number, minFocusedMs?: number, feedbackIntervalMs?: number, ...}` | Adjusts consultation timing live. |
 | `human.timing.reset` | `{}` | Restores the default timing profile. |

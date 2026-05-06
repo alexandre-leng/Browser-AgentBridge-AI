@@ -2,10 +2,17 @@ import type { Page } from 'playwright';
 import crypto from 'node:crypto';
 import { collectElements } from './agent.js';
 
+type Dims = { cssW: number; cssH: number; dpr: number };
+
 export class VisionStream {
   private timer: NodeJS.Timeout | null = null;
   private running = false;
   private lastHash: string | null = null;
+
+  // CSS dimensions only change on resize / navigation. Cache them and invalidate
+  // via page events instead of re-evaluating on every frame (1 IPC saved per tick).
+  private cachedDims: Dims | null = null;
+  private invalidateDims: (() => void) | null = null;
 
   start(
     page: Page,
@@ -20,6 +27,28 @@ export class VisionStream {
     const interval = Math.max(100, Math.round(1000 / Math.max(0.5, fps)));
     this.running = true;
     this.lastHash = null;
+    this.cachedDims = null;
+
+    const invalidate = () => {
+      this.cachedDims = null;
+    };
+    page.on('framenavigated', invalidate);
+    this.invalidateDims = () => page.off('framenavigated', invalidate);
+
+    const getDims = async (): Promise<Dims> => {
+      if (this.cachedDims) return this.cachedDims;
+      const vp = page.viewportSize();
+      const dims = await page
+        .evaluate(() => ({
+          cssW: window.innerWidth,
+          cssH: window.innerHeight,
+          dpr: window.devicePixelRatio || 1,
+        }))
+        .catch(() => ({ cssW: vp?.width ?? 1280, cssH: vp?.height ?? 800, dpr: 1 }));
+      this.cachedDims = dims;
+      return dims;
+    };
+
     const tick = async () => {
       if (!this.running) return;
       try {
@@ -31,15 +60,9 @@ export class VisionStream {
             return;
           }
           this.lastHash = hash;
-          
+
+          const dims = await getDims();
           const vp = page.viewportSize();
-          const dims = await page
-            .evaluate(() => ({
-              cssW: window.innerWidth,
-              cssH: window.innerHeight,
-              dpr: window.devicePixelRatio || 1,
-            }))
-            .catch(() => ({ cssW: vp?.width ?? 1280, cssH: vp?.height ?? 800, dpr: 1 }));
 
           let elements: any[] | undefined;
           if (options.annotate) {
@@ -68,6 +91,9 @@ export class VisionStream {
     this.running = false;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+    if (this.invalidateDims) this.invalidateDims();
+    this.invalidateDims = null;
+    this.cachedDims = null;
   }
 
   get active() {

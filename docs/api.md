@@ -10,7 +10,7 @@ Format de requête :
 { "id": "<id>", "type": "<command>", "payload": { ... } }
 ```
 
-**Total : 79 commandes**
+**Total : 80 commandes**
 
 ## Authentification
 
@@ -116,6 +116,7 @@ Ressource MCP : `api` (`openclaw://api`) expose la liste des commandes bridge en
 
 ### `misc`
 
+- `batch`
 - `navigate`
 - `ping`
 - `screenshot`
@@ -167,8 +168,17 @@ Extrait le texte réellement visible dans le DOM, élément par élément, même
 Payload :
 
 ```json
-{ "query": ".optional-root-css-selector", "textFilter": "Numéro|06|Adresse", "limit": 100 }
+{
+  "query": ".optional-root-css-selector",
+  "textFilter": "Numéro|06|Adresse",
+  "filterAny": ["Numéro", "06", "Adresse"],
+  "filterLines": true,
+  "limit": 100,
+  "includeHidden": false
+}
 ```
+
+`textFilter` reste une expression régulière. Sur Windows/PowerShell, préférez `filterAny` ou `--filter-any=a,b,c` pour éviter que `cmd.exe` interprète `|` comme un pipeline avant que Node reçoive l'argument. `filterLines` filtre ligne par ligne après extraction.
 
 Réponse :
 
@@ -179,9 +189,45 @@ Réponse :
 CLI :
 
 ```bash
-node bridge-cli.cjs visibleText --filter="Numéro|06|Adresse" --limit=50
+node bridge-cli.cjs visibleText --filter-any=Numéro,06,Adresse --filter-lines --limit=50
 # alias accepté
-node bridge-cli.cjs visible-text --filter="Numéro|06|Adresse" --limit=50
+node bridge-cli.cjs visible-text --filter-any=Numéro,06,Adresse --filter-lines --limit=50
+```
+
+### `dom.extract` avec `type: "listings"`
+
+Extrait une liste structurée depuis des cartes de résultats, annuaires, Google Maps, Pages Jaunes ou pages de listings génériques.
+
+Payload :
+
+```json
+{ "type": "listings" }
+```
+
+Réponse :
+
+```json
+{
+  "type": "listings",
+  "listings": [
+    {
+      "name": "Ottho - Formation No Code et IA",
+      "rating": 5,
+      "reviews": 186,
+      "address": "11 Rue Montgrand, Marseille",
+      "phone": "07 57 59 77 84",
+      "website": "https://...",
+      "hours": "Ouvert · Ferme à 18:00",
+      "summary": "Excellente expérience..."
+    }
+  ]
+}
+```
+
+CLI :
+
+```bash
+node bridge-cli.cjs extract listings
 ```
 
 ### Capacités humaines
@@ -190,9 +236,9 @@ node bridge-cli.cjs visible-text --filter="Numéro|06|Adresse" --limit=50
 - `human.timing.set` ajuste à chaud les timings (`consultSpeed`, WPM, min/max, cadence de feedback) pour ralentir ou accélérer les consultations sans redémarrage.
 - `human.timing.reset` restaure le profil par défaut.
 - `human.antispam.check` inspecte la page et renvoie un warning structuré au lieu de lancer une erreur.
-- `human.scan` lit le texte visible, scrolle lentement, puis relit. C'est utile pour découvrir une liste longue comme un humain.
-- `human.findText` cherche un texte visible et scrolle si besoin.
-- `human.clickText` cherche un texte visible et clique au centre de l'élément trouvé, même si ce n'est pas exposé comme bouton/lien.
+- `human.scan` lit le texte visible, scrolle lentement, puis relit. Il accepte `textFilter`, `filterAny`, et `filterLines`.
+- `human.findText` cherche un texte visible et scrolle si besoin, avec un timeout global borné via `timeoutMs`.
+- `human.clickText` cherche un texte visible, logue les étapes (`finding`, `coordinates`, `clicking`) et clique au centre de l'élément trouvé. Si le clic coordonné échoue, il tente un fallback par `agent.click` sur un ref annoté.
 - `human.idle` déplace doucement la souris et marque des pauses de lecture.
 - `human.jitter` ajoute de petites hésitations autour de la position courante.
 - `human.skim` parcourt une page avec scrolls progressifs, pauses et petits retours en arrière.
@@ -203,9 +249,9 @@ node bridge-cli.cjs visible-text --filter="Numéro|06|Adresse" --limit=50
 CLI :
 
 ```bash
-node bridge-cli.cjs scan --steps=4 --filter="Restaurant|Adresse|Numéro"
+node bridge-cli.cjs scan --steps=4 --filter-any=Restaurant,Adresse,Numéro
 node bridge-cli.cjs find-text "Le Ramus"
-node bridge-cli.cjs click-text "Le Ramus"
+node bridge-cli.cjs click-text "Le Ramus" --timeout-ms=15000
 node bridge-cli.cjs idle 2500
 node bridge-cli.cjs jitter 18 4
 node bridge-cli.cjs skim 4 420

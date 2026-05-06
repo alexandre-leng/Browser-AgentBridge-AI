@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import type { HandlerContext, Handler } from './types.js';
 import { sessionStore } from '../controller.js';
 import { resolveVisible } from '../resolver.js';
-import { flashClick, humanMove, humanPreClick, humanType, humanPause, sleep, rand, randInt } from '../human.js';
+import { flashClick, humanMove, humanPreClick, humanType, humanScroll, humanPause, sleep, rand, randInt } from '../human.js';
 import { annotateInteractive, accessibilityTree, findByRef, findSimilar, getAgentElements, type AgentElement } from '../agent.js';
 import { assertNoAntiBot, assertUsefulPage } from '../polite.js';
 
@@ -68,21 +68,21 @@ export function agentHandlers(ctx: HandlerContext): Record<string, Handler> {
 
     'agent.summary': async () => {
       const page = await ctx.p();
-      const tree = await accessibilityTree(page);
+      const { items, total } = await accessibilityTree(page, { limit: 15 });
       const url = page.url();
       const title = await page.title();
-      return { 
-        url, 
-        title, 
-        summary: `Page: ${title}\nURL: ${url}\nInteractive elements: ${tree.length}`,
-        topElements: tree.slice(0, 15) 
+      return {
+        url,
+        title,
+        summary: `Page: ${title}\nURL: ${url}\nInteractive elements: ${total}`,
+        topElements: items,
       };
     },
 
     'agent.tree': async () => {
       const page = await ctx.p();
-      const tree = await accessibilityTree(page);
-      return { url: page.url(), title: await page.title(), tree };
+      const { items, total } = await accessibilityTree(page);
+      return { url: page.url(), title: await page.title(), tree: items, total };
     },
 
     'agent.click': async ({ ref, double = false, retry = true }) => {
@@ -97,11 +97,11 @@ export function agentHandlers(ctx: HandlerContext): Record<string, Handler> {
           const x = el.box.x + Math.round(el.box.w / 2);
           const y = el.box.y + Math.round(el.box.h / 2);
           await humanPreClick(page, x, y);
-          await sleep(rand(50, 130));
+          await sleep(rand(15, 60));
           if (double) {
             await page.mouse.dblclick(x, y);
           } else {
-            await page.mouse.click(x, y, { delay: randInt(40, 110) });
+            await page.mouse.click(x, y, { delay: randInt(15, 60) });
           }
           await flashClick(page, x, y);
           await assertNoAntiBot(page);
@@ -127,14 +127,14 @@ export function agentHandlers(ctx: HandlerContext): Record<string, Handler> {
       const x = el.box.x + Math.round(el.box.w / 2);
       const y = el.box.y + Math.round(el.box.h / 2);
       await humanPreClick(page, x, y);
-      await page.mouse.click(x, y, { delay: randInt(30, 80) });
+      await page.mouse.click(x, y, { delay: randInt(15, 50) });
       await flashClick(page, x, y);
-      await humanPause(80, 200);
+      await humanPause(40, 110);
       if (clearFirst) {
         await page.keyboard.press('Control+a');
-        await sleep(rand(30, 80));
+        await sleep(rand(15, 40));
         await page.keyboard.press('Delete');
-        await sleep(rand(30, 60));
+        await sleep(rand(15, 35));
       }
       await humanType(page, val);
       return { typed: val.length, ref };
@@ -151,7 +151,7 @@ export function agentHandlers(ctx: HandlerContext): Record<string, Handler> {
           await humanMove(page, x, y);
           await page.mouse.click(x, y);
           await flashClick(page, x, y);
-          await sleep(rand(30, 80));
+          await sleep(rand(15, 45));
         }
       }
       await page.keyboard.press(String(key));
@@ -181,7 +181,6 @@ export function agentHandlers(ctx: HandlerContext): Record<string, Handler> {
       const dy = direction === 'up' ? -a : direction === 'down' ? a : 0;
       const dx = direction === 'left' ? -a : direction === 'right' ? a : 0;
       if (typeof x === 'number' && typeof y === 'number') await humanMove(page, x, y);
-      const { humanScroll } = await import('../human.js');
       await humanScroll(page, dy, dx);
       await assertNoAntiBot(page);
       return { ok: true };
@@ -189,13 +188,12 @@ export function agentHandlers(ctx: HandlerContext): Record<string, Handler> {
 
     'agent.discoverScroll': async ({ direction = 'down', amount = 650, steps = 5, annotate = true }: any = {}) => {
       const page = await ctx.p();
-      const { humanScroll } = await import('../human.js');
       const captures = [];
       const safeSteps = Math.max(1, Math.min(Number(steps) || 5, 20));
       const delta = direction === 'up' ? -Math.abs(amount) : Math.abs(amount);
       for (let i = 0; i < safeSteps; i++) {
         await humanScroll(page, delta);
-        await sleep(rand(450, 1100));
+        await sleep(rand(180, 420));
         await assertNoAntiBot(page);
         if (annotate && ctx.dispatch) {
           const ann = await ctx.dispatch('page.annotate', { noImage: true });
