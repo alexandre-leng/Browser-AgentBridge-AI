@@ -1,7 +1,7 @@
 {
   "name": "@alexandre-leng/openclaw-browser-bridge",
-  "version": "3.2.0",
-  "description": "Pont de contr\u00f4le navigateur humain bas\u00e9 sur Playwright",
+  "version": "3.2.1",
+  "description": "Pont de contrôle navigateur humain basé sur Playwright",
   "type": "module",
   "bin": {
     "openclaw-live": "./dist/cli/live.js",
