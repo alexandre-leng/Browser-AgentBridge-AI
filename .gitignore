@@ -1,6 +1,5 @@
 # Dependencies
 node_modules/
-package-lock.json
 
 # Build outputs
 dist/
@@ -20,7 +19,6 @@ npm-debug.log*
 
 # Temporary files
 archives/
-tests/
 scratch/
 temp/
 temp_xpi_check/
