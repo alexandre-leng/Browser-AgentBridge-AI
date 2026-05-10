@@ -319,6 +319,9 @@ For advanced, precise, multi-step workflows. **80 commands total** across 14 cat
 | `agent.summary` | Lightweight: URL, title, top elements | `{}` |
 | `agent.tree` | Full ARIA accessibility tree | `{}` |
 | `vision.screenshot` | Raw screenshot as base64 | `{}` |
+| `vision.start` | Start real-time frame stream (broadcasts `vision.frame` events to all clients) | `{fps: number, annotate?: boolean}` |
+| `vision.stop` | Stop real-time frame stream | `{}` |
+| *(event)* `vision.frame` | Server-pushed frame event while streaming (use MD5 diffing) | `{frame: base64, timestamp, md5}` |
 | `dom.visibleText` | Extract visible text with filters | `{query: ".css", filterAny: ["Numéro", "06"], filterLines: true, limit: 100}` |
 
 #### 🧭 NAVIGATE — Move around
