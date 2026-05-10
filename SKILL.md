@@ -5,7 +5,7 @@ description: |
   • CLI (bridge.cmd) — simple exec commands for quick tasks
   • JSON-RPC over WebSocket — precise id-based interaction for advanced workflows
   Navigate, search, click, extract data, and run batch workflows.
-version: 2.5.0
+version: 3.2.0
 ---
 
 # 🦾 Skill: OpenClaw Browser Bridge
@@ -809,4 +809,4 @@ For environment variables and security hardening:
 
 ---
 
-*Skill version: 2.5.0 | Bridge version: 3.2+ | Last updated: 2026-05-05*
+*Skill version: 3.2.0 | Bridge version: 3.2+ | Last updated: 2026-05-05*
