@@ -11,7 +11,61 @@ version: 3.2.0
 
 > **You are an AI agent with a browser.** You control it via `id`-based interaction (numerical refs). No coordinate guessing. No HTML parsing. Just stable element IDs.
 
-## 🔀 One protocol to rule them all: MCP (default)
+## ⌛ 2-Minute Quickstart
+
+Do this loop, every time, for any task:
+
+```
+1. navigate → go to page
+2. annotate → get numbered elements (refs)
+3. look at refs, pick one
+4. click <ref> or type <ref> <text>
+5. verify with summary or annotate again
+```
+
+**Minimal example — search DuckDuckGo for "formalibre":**
+
+```javascript
+// Step 1: Go to the page
+browser_command (navigate, {url: "https://duckduckgo.com"})
+
+// Step 2: See what's on the page
+browser_command (annotate_page, {})
+// Returns: elements[{ref:7, type:"input", name:"search"}, ...]
+
+// Step 3: Click on the search bar (ref 7)
+browser_command (click_ref, {ref: 7})
+
+// Step 4: Type the query
+browser_command (type_ref, {ref: 7, text: "formalibre"})
+
+// Step 5: Press Enter and wait for results
+browser_command (navigate, {url: "https://duckduckgo.com/?q=formalibre"})
+```
+
+That's it. 5 commands, 30 seconds.
+
+---
+
+## 📋 Contents
+
+Sections below are **reference material** — don't read them all. Jump to what you need:
+
+| If you... | Go to section |
+|---|---|
+| want the full protocol reference | §7 — JSON-RPC Approach |
+| need human-like behavior | §7.1 — Human Commands |
+| need to extract data | §7.2 — DOM Extraction |
+| want to run multiple steps at once | §8 — Batch Execution |
+| hit an error | §11 — Error Handling |
+| get blocked by anti-bot | §7.1 → human.antispam.check |
+| want environment variables | §13 — Environment Variables |
+| want the CLI reference | §6 — CLI Approach |
+| want installation help | §1 — Installation |
+
+---
+
+## 🔀 Default: MCP (recommended)
 
 **Always start with MCP.** It exposes focused tools: `navigate`, `annotate_page`, `click_ref`, `type_ref`, `extract_schema`, `human_timing_get/set`, `human_antispam_check`.
 
