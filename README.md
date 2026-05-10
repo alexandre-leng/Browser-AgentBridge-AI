@@ -5,6 +5,8 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Playwright](https://img.shields.io/badge/Powered%20by-Playwright-00ad5a.svg)](https://playwright.dev/)
+[![CI](https://github.com/alexandre-leng/openclaw-browser-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/alexandre-leng/openclaw-browser-bridge/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/openclaw-browser-bridge)](https://www.npmjs.com/package/openclaw-browser-bridge)
 
 ---
 
@@ -20,22 +22,34 @@ Most AI agents "guess" where to click using screenshots. OpenClaw provides a **D
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Quick Start (2 minutes)
 
-### 1. Installation
+### 1. Install
 ```bash
-git clone https://github.com/alexandre-leng/openclaw-browser-bridge.git
-cd openclaw-browser-bridge
-npm install
+npm install openclaw-browser-bridge
 npx playwright install chromium
 ```
 
-### 2. Launch the Bridge
+### 2. Launch
 ```bash
 npm start
+# → http://localhost:8080/viewer
+# → ws://localhost:8080/ws/browser-bridge
 ```
-- **Live Viewer**: `http://localhost:8080/viewer`
-- **WebSocket**: `ws://localhost:8080/ws/browser-bridge`
+
+### 3. Test it
+```bash
+# CLI
+node node_modules/.bin/openclaw-live navigate https://example.com
+
+# Or open http://localhost:8080/viewer in your browser
+```
+
+### Docker (alternative)
+```bash
+docker build -t browser-bridge .
+docker run -p 8080:8080 browser-bridge
+```
 
 ### MCP Server
 ```bash
