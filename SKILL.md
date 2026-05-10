@@ -1,25 +1,38 @@
 ---
 name: browser-bridge
 description: |
-  Browser automation via OpenClaw Browser Bridge. Two approaches:
-  • CLI (bridge.cmd) — simple exec commands for quick tasks
-  • JSON-RPC over WebSocket — precise id-based interaction for advanced workflows
-  Navigate, search, click, extract data, and run batch workflows.
+  Browser automation via OpenClaw Browser Bridge.
+  Default: MCP server (9 tools, simple). Advanced: JSON-RPC (80 commands, precise).
+  Navigate, annotate, click, type, extract, human-like behavior.
 version: 3.2.0
 ---
 
 # 🦾 Skill: OpenClaw Browser Bridge
 
-> **You are an AI agent with a browser.** This skill teaches you to see web pages, interact with them precisely, extract data, and simulate human behavior — all via a WebSocket bridge. No coordinate guessing. No HTML parsing. Just `id`-based interaction (CLI) or 79 JSON-RPC commands (WebSocket).
+> **You are an AI agent with a browser.** You control it via `id`-based interaction (numerical refs). No coordinate guessing. No HTML parsing. Just stable element IDs.
 
-Two approaches depending on your needs:
+## 🔀 One protocol to rule them all: MCP (default)
 
-| Approach | When to use | How |
-|----------|-------------|-----|
-| **CLI** (`bridge.cmd`) | Quick tasks, simple scripts, one-off commands | `exec` tool, batch via `run` |
-| **JSON-RPC** (WebSocket) | Multi-step workflows, session isolation, human-like behavior, precision | Direct WS messages, `script.execute` |
+**Always start with MCP.** It exposes focused tools: `navigate`, `annotate_page`, `click_ref`, `type_ref`, `extract_schema`, `human_timing_get/set`, `human_antispam_check`.
 
-Both control the **same** Browser Bridge server.
+- Connect via `openclaw-mcp` after `npm run build`
+- Works with Claude Desktop, Codex, and any MCP client
+- Simpler, smaller, enough for 80% of tasks
+
+## ⚡ When to switch to JSON-RPC (advanced)
+
+Only reach for WebSocket when you genuinely need one of these:
+- Session isolation (`session.create` for parallel browsing)
+- Human timing live feedback (`human.feedback` events)
+- Low-level commands (`input.*`, `cookie.*`, `viewport.*`)
+- Vision streaming (`vision.start/stop`)
+- Batch execution via `script.execute`
+
+Switch by connecting directly to `ws://localhost:8080/ws/browser-bridge`.
+
+## 🪟 CLI (`bridge.cmd`) — for quick one-off commands
+
+Use the `exec` tool for simple, single actions (quick test, navigate once). Not recommended as your primary approach.
 
 ---
 
