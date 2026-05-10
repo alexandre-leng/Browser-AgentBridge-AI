@@ -78,7 +78,7 @@ Ressource MCP : `api` (`openclaw://api`) expose la liste des commandes bridge en
 - `dom.submit`
 - `dom.type`
 - `dom.visibleText`
-- `dom.waitFor`
+- `dom.waitFor` — attend qu'un élément DOM soit dans un état donné (`{query, state?: "visible", timeout?: 10000}`)
 
 ### `exec`
 
@@ -145,9 +145,9 @@ Ressource MCP : `api` (`openclaw://api`) expose la liste des commandes bridge en
 
 ### `trace`
 
-- `trace.artifacts`
-- `trace.list`
-- `trace.save`
+- `trace.artifacts` — liste les artifacts de trace disponibles (`{}`)
+- `trace.list` — liste les événements de trace d'une session (`{sessionId?: string}`)
+- `trace.save` — sauvegarde la trace sur disque (`{sessionId?: string}`)
 
 ### `viewport`
 
@@ -155,9 +155,10 @@ Ressource MCP : `api` (`openclaw://api`) expose la liste des commandes bridge en
 
 ### `vision`
 
-- `vision.screenshot`
-- `vision.start`
-- `vision.stop`
+- `vision.screenshot` — capture d'écran en base64 (`{}`)
+- `vision.start` — démarre le streaming temps réel (`{fps: number, annotate?: boolean}`)
+- `vision.stop` — arrête le streaming (`{}`)
+- `vision.frame` (event serveur) — image diffusée pendant le streaming (`{frame: base64, timestamp, md5}`)
 
 ## Commandes utiles
 

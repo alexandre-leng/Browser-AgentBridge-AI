@@ -437,6 +437,7 @@ Controls consultation speeds: reading, scanning, re-reading. Mouse/keyboard have
 |---------|---------|---------|
 | `dom.extract` | Smart extraction by type | `{type: "search-results\|form\|article\|table\|google-maps\|listings"}` |
 | `dom.html` | Inner HTML of selector | `{selector: "body"}` |
+| `dom.waitFor` | Wait for element state | `{query: ".result", state: "visible", timeout: 10000}` |
 | `dom.inspect` | Debug element by ref | `{ref: 7}` |
 | `dom.visibleText` | Visible text with filters | `{textFilter: "...", filterAny: ["a", "b"], filterLines: true, limit: 100}` |
 
@@ -464,6 +465,9 @@ Controls consultation speeds: reading, scanning, re-reading. Mouse/keyboard have
 |---------|---------|
 | `session.create` | Create named browser context (payload: `{id: "my-session"}`) |
 | `session.list` | List active sessions |
+| `trace.list` | List trace events for a session | `{sessionId: "my-session"}` |
+| `trace.save` | Save trace to disk | `{sessionId: "my-session"}` |
+| `trace.artifacts` | List trace artifacts | `{}` |
 
 Send `"sessionId": "my-session"` in any request to target a specific session.
 
