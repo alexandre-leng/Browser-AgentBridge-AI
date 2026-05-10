@@ -1,59 +1,24 @@
-# Browser Bridge — API Reference
-
-Version documentée : `3.2.0`.
-
-Commandes JSON-RPC exposées via WebSocket sur `/ws/browser-bridge`.
-
-Format de requête :
-
-```json
-{ "id": "<id>", "type": "<command>", "payload": { ... } }
-```
-
-**Total : 80 commandes**
-
-## Authentification
-
-- `BRIDGE_TOKEN` : header `Authorization: Bearer <token>` (ou `?token=`). Obligatoire si `BRIDGE_HOST` n'est pas local.
-- `BRIDGE_ALLOWED_ORIGINS` : CSV d'origines autorisées (rejet sinon)
-- `BRIDGE_ALLOW_EXEC_SCRIPT=1` + `BRIDGE_ADMIN_TOKEN` : requis pour `exec.script`, token à fournir dans le payload (`adminToken`)
-- `BRIDGE_ALLOW_FILE_URLS=1` + `BRIDGE_ALLOWED_FILE_ROOTS` : requis pour naviguer vers `file:`.
-
-## MCP
-
-Serveur MCP officiel via stdio : `npm run mcp` ou `openclaw-mcp` après build.
-
-Outils MCP principaux : `browser_status`, `navigate`, `annotate_page`, `click_ref`, `type_ref`, `extract_schema`, `human_timing_get`, `human_timing_set`, `human_antispam_check`. Outil bas niveau `browser_command` activable via `BRIDGE_MCP_ALLOW_RAW=1`.
-
-Les outils `human_timing_get`, `human_timing_set` et `human_antispam_check` sont prévus pour les agents : ils permettent d'adapter la cadence en cours de session sans exposer toute l'API brute.
-
-Ressource MCP : `api` (`openclaw://api`) expose la liste des commandes bridge enregistrées. Prompt MCP : `browser_task` fournit un canevas de tâche navigateur orienté refs.
-
-## Commandes par catégorie
-
 ### `agent`
 
-- `agent.click`
-- `agent.discoverScroll`
-- `agent.hover`
-- `agent.press`
-- `agent.scroll`
-- `agent.search`
-- `agent.select`
-- `agent.summary`
-- `agent.task`
-- `agent.tree`
-- `agent.type`
-- `agent.waitFor`
+| Commande | Paramètres | Description |
+|---|---|---|
+| `agent.click` | `{ref, double?: false, retry?: true}` | Clic humain sur élément #ref |
+| `agent.discoverScroll` | `{direction?, amount?}` | Scroll avec détection de contenu |
+| `agent.hover` | `{ref}` | Survol humain |
+| `agent.press` | `{key, ref?}` | Touche clavier |
+| `agent.scroll` | `{direction?, amount?}` | Scroll fluide |
+| `agent.search` | `{query, engine?}` | Recherche web |
+| `agent.select` | `{ref}` | Focus élément |
+| `agent.summary` | `{}` | Résumé page |
+| `agent.task` | `{goal}` | Tâche LLM |
+| `agent.tree` | `{}` | Arbre accessibilité |
+| `agent.type` | `{ref, text, clearFirst?: true}` | Saisie avec effacement préalable |
+| `agent.waitFor` | `{ref, timeout?}` | Attente élément
 
 ### `browser`
 
 - `browser.close`
 - `browser.status`
-
-### `combo`
-
-- `combo.searchAndClick`
 
 ### `cookie`
 
@@ -62,23 +27,25 @@ Ressource MCP : `api` (`openclaw://api`) expose la liste des commandes bridge en
 
 ### `dom`
 
-- `dom.click`
-- `dom.doubleClick`
-- `dom.extract`
-- `dom.fillForm`
-- `dom.goto`
-- `dom.hover`
-- `dom.html`
-- `dom.inspect`
-- `dom.press`
-- `dom.scrollDown`
-- `dom.scrollUp`
-- `dom.search`
-- `dom.select`
-- `dom.submit`
-- `dom.type`
-- `dom.visibleText`
-- `dom.waitFor` — attend qu'un élément DOM soit dans un état donné (`{query, state?: "visible", timeout?: 10000}`)
+| Commande | Paramètres | Description |
+|---|---|---|
+| `dom.click` | `{query?, selector?, text?}` | Clic sur élément par sélecteur CSS, XPath ou texte |
+| `dom.doubleClick` | `{query?, selector?, text?}` | Double-clic |
+| `dom.extract` | `{type?, schema?, llm?}` | Extraction structurée |
+| `dom.fillForm` | `{query?, selector?}` | Remplit un formulaire |
+| `dom.goto` | `{url}` | Naviguer vers URL (simplifié) |
+| `dom.hover` | `{query?, selector?, text?}` | Survole un élément |
+| `dom.html` | `{query?, selector?}` | HTML interne d'un élément |
+| `dom.inspect` | `{query?, selector?}` | Inspecte un élément (tag, classes, attributs) |
+| `dom.press` | `{key, waitForNavigation?, timeout?: 10000}` | Presse une touche. `waitForNavigation` auto si Enter |
+| `dom.scrollDown` | `{amount?: number}` | Scroll vers le bas |
+| `dom.scrollUp` | `{amount?: number}` | Scroll vers le haut |
+| `dom.search` | `{query}` | Recherche sur le moteur actuel |
+| `dom.select` | `{query?, selector?, text?, value?}` | Sélectionne une option dans un `<select>` |
+| `dom.submit` | `{query?, selector?, timeout?: 10000}` | Soumet un formulaire |
+| `dom.type` | `{query?, selector?, value?, text?}` | Tape du texte dans un champ |
+| `dom.visibleText` | `{query?, textFilter?, filterAny?, filterLines?, limit?: 300, includeHidden?}` | Extrait le texte visible |
+| `dom.waitFor` | `{query?, selector?, text?, state?: "visible"\|"hidden"\|"attached", timeout?: 10000}` | Attend un état DOM |
 
 ### `exec`
 
@@ -114,44 +81,73 @@ Ressource MCP : `api` (`openclaw://api`) expose la liste des commandes bridge en
 - `input.text`
 - `input.wheel`
 
-### `misc`
-
-- `batch`
-- `navigate`
-- `ping`
-- `screenshot`
-- `search`
-- `wait`
-
 ### `page`
 
-- `page.annotate`
+| Commande | Paramètres | Description |
+|---|---|---|
+| `page.annotate` | `{noImage?: boolean}` | Capture + éléments. `noImage` = 10x plus rapide |
+
+### `misc`
+
+| Commande | Paramètres | Description |
+|---|---|---|
+| `misc.search` | `{query, engine?: "google"\|"bing"}` | Cherche sur un moteur |
+| `misc.wait` | `{ms}` | Pause |
+
+### `combo`
+
+| Commande | Paramètres | Description |
+|---|---|---|
+| `combo.searchAndClick` | `{query, engine?: "google"\|"bing"}` | Cherche + clique premier résultat |
 
 ### `script`
 
-- `script.execute`
+| Commande | Paramètres | Description |
+|---|---|---|
+| `script.execute` | `{commands: [], sessionId?}` | Exécute plusieurs commandes batch |
+| `exec.script` | `{code, adminToken}` | Exécute du JS arbitraire (si autorisé) |
 
 ### `session`
 
-- `session.create`
-- `session.list`
+| Commande | Paramètres | Description |
+|---|---|---|
+| `session.create` | `{sessionId, headless?: boolean, profileDir?: string}` | Crée un contexte navigateur isolé |
+| `session.list` | `{}` | Liste les sessions actives |
+| `browser.status` | `{}` | Statut du navigateur (sessions, mémoire) |
+| `browser.close` | `{}` | Ferme le navigateur |
+| `screenshot` | `{format?: "png"\|"jpg", fullPage?: boolean}` | Capture d'écran (URL + dataUrl) |
+| `cookie.get` | `{urls?: string[]}` | Récupère les cookies |
+| `cookie.set` | `{cookies}` | Définit des cookies |
 
 ### `tab`
 
-- `tab.close`
-- `tab.list`
-- `tab.new`
-- `tab.switch`
+| Commande | Paramètres | Description |
+|---|---|---|
+| `tab.close` | `{index}` | Ferme un onglet |
+| `tab.list` | `{}` | Liste les onglets ouverts |
+| `tab.new` | `{url?: string}` | Nouvel onglet (optionnellement navigue) |
+| `tab.switch` | `{index}` | Change d'onglet |
 
 ### `trace`
 
-- `trace.artifacts` — liste les artifacts de trace disponibles (`{}`)
-- `trace.list` — liste les événements de trace d'une session (`{sessionId?: string}`)
-- `trace.save` — sauvegarde la trace sur disque (`{sessionId?: string}`)
+| Commande | Paramètres | Description |
+|---|---|---|
+| `trace.artifacts` | `{}` | Liste les artifacts de trace disponibles |
+| `trace.list` | `{sessionId?: string}` | Liste les événements de trace d'une session |
+| `trace.save` | `{sessionId?: string}` | Sauvegarde la trace sur disque |
 
 ### `viewport`
 
-- `viewport.set`
+| Commande | Paramètres | Description |
+|---|---|---|
+| `viewport.set` | `{width, height}` | Redimensionne le viewport |
+
+### `batch`
+
+| Commande | Paramètres | Description |
+|---|---|---|
+| `batch` | `{commands: [], stopOnError?: boolean}` | Exécute plusieurs commandes en séquence |
+| `wait` | `{ms: number}` | Pause en millisecondes |
 
 ### `vision`
 
@@ -384,3 +380,4 @@ Exemple WebSocket complet :
 | `BRIDGE_LOG_JSON` | logs JSON si `1` | 0 |
 | `BRIDGE_LOG_LEVEL` | niveau min logs | info |
 | `BRIDGE_MCP_ALLOW_RAW` | expose l'outil MCP brut `browser_command` si `1` | 0 |
+

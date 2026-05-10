@@ -35,12 +35,12 @@ All commands are sent as JSON over WebSocket to `/ws/browser-bridge`.
 
 | Command | Payload | Description |
 | :--- | :--- | :--- |
-| `agent.click` | `{ref: number, double?: boolean}` | Moves mouse in a Bezier curve to the element and clicks. |
-| `agent.type` | `{ref: number, text: string, clearFirst?: boolean}` | Focuses the element and types with realistic jitter. |
+| `agent.click` | `{ref: number, double?: boolean, retry?: true}` | Moves mouse in a Bezier curve to the element and clicks. |
+| `agent.type` | `{ref: number, text: string, clearFirst?: true}` | Focuses the element and types with realistic jitter. |
 | `agent.press` | `{key: string, ref?: number}` | Presses a key (e.g., `Enter`, `Tab`). Auto-waits for navigation if `Enter`. |
 | `agent.scroll` | `{direction: 'up'\|'down', amount?: number}` | Smoothly scrolls the viewport. |
 | `agent.hover` | `{ref: number}` | Moves the mouse to hover over an element. |
-| `agent.summary` | `{}` | Returns a text summary: URL, Title, and top interactive elements. |
+| `agent.summary` | `{}` | Returns a text summary: URL, Title, interactive elements, elementCount. |
 | `agent.search` | `{query: string, engine?: 'google'\|'bing'}` | Navigates to a search engine and extracts results. |
 
 ### 👁️ Vision Module (`page.*` & `vision.*`)
@@ -85,6 +85,24 @@ All commands are sent as JSON over WebSocket to `/ws/browser-bridge`.
   ]
 }
 ```
+
+### 🖱️ DOM Module (`dom.*`)
+*Direct DOM manipulation using selectors (not recommended — prefer `agent.*` with refs).*
+
+| Command | Payload | Description |
+| :--- | :--- | :--- |
+| `dom.click` | `{query?, selector?, text?}` | Clicks an element. |
+| `dom.doubleClick` | `{query?, selector?, text?}` | Double-clicks an element. |
+| `dom.press` | `{key, waitForNavigation?, timeout?: 10000}` | Presses a key. `waitForNavigation` defaults to `true` for Enter. |
+| `dom.type` | `{query?, selector?, value?, text?}` | Types text into a field. |
+| `dom.submit` | `{query?, selector?, timeout?: 10000}` | Submits a form (waits for navigation). |
+| `dom.select` | `{query?, selector?, text?, value?}` | Selects an option in a `<select>` element. |
+| `dom.hover` | `{query?, selector?, text?}` | Hovers over an element. |
+| `dom.waitFor` | `{query?, selector?, text?, state?: 'visible'\|'hidden'\|'attached', timeout?: 10000}` | Waits for an element state. |
+| `dom.html` | `{query?, selector?}` | Returns inner HTML. |
+| `dom.inspect` | `{query?, selector?}` | Returns element tag, classes, attributes. |
+
+---
 
 ### ⌨️ Raw Input Module (`input.*`)
 *Low-latency primitives used by the Viewer for manual takeover.*
@@ -182,7 +200,9 @@ The bridge can be configured via `.env` or environment variables:
 ## 🔒 Security & Performance
 
 - **Rate Limiting**: Each WebSocket client is limited to 100 commands per minute to prevent accidental spamming.
-- **Session Isolation**: Use `sessionId` in payloads to manage multiple independent browser contexts simultaneously.
+- **Session Isolation**: Use `session.create` with `{sessionId, headless?, profileDir?}` to manage multiple independent browser contexts simultaneously.
+- **Batch Execution**: Use `script.execute` or `batch` with `{commands, stopOnError?}` to pipeline multiple commands in a single round-trip.
+- **Cookies**: `cookie.get({urls?})` and `cookie.set({cookies})` for state management across sessions.
 - **Vision Diffing**: The vision stream uses MD5 hashing to only send frames when the page actually changes, saving bandwidth.
 
 ---
