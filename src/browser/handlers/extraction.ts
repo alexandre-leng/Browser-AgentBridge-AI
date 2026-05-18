@@ -17,6 +17,46 @@ export function extractionHandlers(ctx: HandlerContext): Record<string, Handler>
       const page = await ctx.p();
       await assertNoAntiBot(page);
       await assertUsefulPage(page, 'dom.extract');
+      if (type === 'custom') {
+        if (!schema || !schema.itemSelector || !schema.fields) {
+          throw new Error('For custom extraction, schema must contain itemSelector and fields mapping.');
+        }
+        const extracted = await page.evaluate(({ schema }) => {
+          const items: any[] = [];
+          const getElementVal = (el: Element, sel: string): string => {
+            if (sel.startsWith('xpath=')) {
+              const xp = sel.slice(6);
+              const result = document.evaluate(xp, el, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+              return result.singleNodeValue?.textContent?.trim() || '';
+            }
+            return el.querySelector(sel)?.textContent?.trim() || '';
+          };
+          
+          let nodes: Element[] = [];
+          if (schema.itemSelector.startsWith('xpath=')) {
+            const xp = schema.itemSelector.slice(6);
+            const result = document.evaluate(xp, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+            for (let i = 0; i < result.snapshotLength; i++) {
+              const node = result.snapshotItem(i);
+              if (node instanceof Element) nodes.push(node);
+            }
+          } else {
+            nodes = Array.from(document.querySelectorAll(schema.itemSelector));
+          }
+          
+          for (const node of nodes) {
+            const item: any = {};
+            for (const [key, sel] of Object.entries(schema.fields)) {
+              if (typeof sel === 'string') {
+                item[key] = getElementVal(node, sel);
+              }
+            }
+            items.push(item);
+          }
+          return items;
+        }, { schema });
+        return { type, results: extracted };
+      }
       if (schema) {
         if (llm) {
           return {

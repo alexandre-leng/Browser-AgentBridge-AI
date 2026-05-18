@@ -12,8 +12,25 @@ export function agentHandlers(ctx: HandlerContext): Record<string, Handler> {
     const sessionId = sessionStore.getStore();
     let el = findByRef(ref, sessionId);
     if (!el && retry) {
+      const oldElements = getAgentElements(sessionId);
+      const oldEl = oldElements.find(e => String(e.id) === String(ref));
+
       await annotateInteractive(await ctx.p(), sessionId);
       el = findByRef(ref, sessionId);
+
+      if (!el && oldEl) {
+        const newElements = getAgentElements(sessionId);
+        let bestMatch = newElements.find(e => e.role === oldEl.role && e.name === oldEl.name && e.tag === oldEl.tag);
+        if (!bestMatch) {
+          bestMatch = newElements.find(e => e.role === oldEl.role && e.name === oldEl.name);
+        }
+        if (!bestMatch && oldEl.name) {
+          bestMatch = newElements.find(e => e.name === oldEl.name);
+        }
+        if (bestMatch) {
+          el = bestMatch;
+        }
+      }
     }
     if (!el) {
       const suggestions = typeof ref === 'string' 
@@ -132,7 +149,8 @@ export function agentHandlers(ctx: HandlerContext): Record<string, Handler> {
       await flashClick(page, x, y);
       await humanPause(40, 110);
       if (clearFirst) {
-        await page.keyboard.press('Control+a');
+        const isMac = process.platform === 'darwin';
+        await page.keyboard.press(isMac ? 'Meta+a' : 'Control+a');
         await sleep(rand(15, 40));
         await page.keyboard.press('Delete');
         await sleep(rand(15, 35));

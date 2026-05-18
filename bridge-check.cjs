@@ -2,7 +2,8 @@ const http = require('http');
 const { spawn } = require('child_process');
 const path = require('path');
 
-const BRIDGE_URL = 'http://localhost:8080/health';
+const PORT = process.env.PORT || 8080;
+const BRIDGE_URL = `http://localhost:${PORT}/health`;
 
 function checkHealth() {
   return new Promise((resolve) => {
