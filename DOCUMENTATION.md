@@ -1,7 +1,7 @@
 # OpenClaw Browser Bridge — Full Technical Reference
 
-> **Version**: 3.2.0
-> **Last Updated**: May 5, 2026
+> **Version**: 3.2.2
+> **Last Updated**: May 18, 2026
 
 The OpenClaw Browser Bridge is a high-performance automation layer that bridges the gap between AI Agents and the Web. It focuses on **precision**, **human-like interaction**, and **structured data extraction**.
 
