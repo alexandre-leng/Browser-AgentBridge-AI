@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Playwright](https://img.shields.io/badge/Powered%20by-Playwright-00ad5a.svg)](https://playwright.dev/)
 [![CI](https://github.com/alexandre-leng/openclaw-browser-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/alexandre-leng/openclaw-browser-bridge/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/@alexandre-leng/openclaw-browser-bridge)](https://www.npmjs.com/package/@alexandre-leng/openclaw-browser-bridge)
+[![npm](https://img.shields.io/npm/v/openclaw-browser-bridge)](https://www.npmjs.com/package/openclaw-browser-bridge)
 
 ---
 
@@ -26,7 +26,7 @@ Most AI agents "guess" where to click using screenshots. OpenClaw provides a **D
 
 ### 1. Install
 ```bash
-npm install @alexandre-leng/openclaw-browser-bridge
+npm install openclaw-browser-bridge
 npx playwright install chromium
 ```
 

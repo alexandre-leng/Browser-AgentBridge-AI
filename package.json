@@ -1,5 +1,5 @@
 {
-  "name": "@alexandre-leng/openclaw-browser-bridge",
+  "name": "openclaw-browser-bridge",
   "version": "3.2.2",
   "description": "Pont de contrôle navigateur humain basé sur Playwright",
   "type": "module",
