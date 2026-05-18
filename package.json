@@ -17,7 +17,6 @@
     "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
     "docs:api": "tsx scripts/gen-api-docs.ts",
     "benchmark": "tsx scripts/benchmark.ts",
-    "test:site": "tsx scripts/test-site-openclaw.ts",
     "prepare": "npm run build || true",
     "prepublishOnly": "npm run build"
   },
