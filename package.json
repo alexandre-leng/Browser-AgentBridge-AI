@@ -4,8 +4,8 @@
   "description": "Pont de contrôle navigateur humain basé sur Playwright",
   "type": "module",
   "bin": {
-    "openclaw-live": "./dist/cli/live.js",
-    "openclaw-mcp": "./dist/mcp.js"
+    "openclaw-live": "dist/cli/live.js",
+    "openclaw-mcp": "dist/mcp.js"
   },
   "scripts": {
     "start": "tsx src/server.ts",
