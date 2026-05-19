@@ -4,6 +4,8 @@ import { navigationHandlers } from './navigation.js';
 import { domHandlers } from './dom.js';
 import { agentHandlers } from './agent.js';
 import { extractionHandlers } from './extraction.js';
+import { formHandlers } from './forms.js';
+import { webHandlers } from './web.js';
 import { inputHandlers } from './input.js';
 import { sessionHandlers } from './session.js';
 import { specialHandlers } from './special.js';
@@ -20,6 +22,8 @@ export function buildHandlers(broadcast: Broadcaster, dispatch?: Dispatcher): Re
     ...domHandlers(ctx),
     ...agentHandlers(ctx),
     ...extractionHandlers(ctx),
+    ...formHandlers(ctx),
+    ...webHandlers(ctx),
     ...inputHandlers(ctx),
     ...sessionHandlers(ctx),
     ...specialHandlers(ctx),

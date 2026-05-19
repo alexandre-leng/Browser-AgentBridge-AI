@@ -60,6 +60,40 @@ After `npm run build`, the package exposes `openclaw-mcp`. The MCP server regist
 
 The MCP resource `api` (`openclaw://api`) exposes the registered bridge command list, and the `browser_task` prompt gives agents a refs-first task template.
 
+### Agent Skill Install
+
+Install OpenClaw Browser Bridge as an AgentSkills-compatible skill for local agents:
+
+```bash
+npm run build
+npx openclaw-browser-bridge install openclaw --global
+npx openclaw-browser-bridge install hermes
+```
+
+Targets:
+- `openclaw`: writes `openclaw-browser-bridge/SKILL.md` and `PROMPTS.md` into `./skills` by default, or `~/.openclaw/skills` with `--global`.
+- `hermes`: writes the skill into `~/.hermes/skills/openclaw-browser-bridge`.
+- `all`: installs both adapters.
+
+Use `--workspace <path>` to stage into a workspace instead of a user-level directory, and `--dry-run` to preview paths.
+
+Reusable browser scripts can be run from JSON:
+
+```bash
+npx openclaw-browser-bridge script ./examples/browser-script.json
+```
+
+```json
+{
+  "steps": [
+    { "type": "navigate", "url": "https://example.com" },
+    { "type": "annotate" },
+    { "type": "click", "ref": 3 },
+    { "type": "summary" }
+  ]
+}
+```
+
 ---
 
 ## 🛠️ The `bridge` CLI
@@ -90,7 +124,8 @@ Designed specifically for LLMs (Claude, GPT, Gemini).
 - **`page.annotate`**: Generates a numbered screenshot + structured element list.
 - **`agent.click {ref: N}`**: Clicks the element with ID `N` using human-like motion.
 - **`agent.type {ref: N, text: "..."}`**: Focuses and types with realistic delays.
-- **`dom.extract {type: "search-results"|"form"|"table"|"google-maps"|"listings"}`**: Returns clean JSON instead of a wall of text.
+- **`web.search {query, limit?, engine?, pages?}`**: Searches the web, paginates, deduplicates URLs, and returns a run report.
+- **`dom.extract {type: "search-results"|"form"|"table"|"google-maps"|"listings"|"marketplace"}`**: Returns clean JSON instead of a wall of text.
 - **`dom.extract {schema}`**: Extracts typed fields from CSS selectors.
 - **`dom.extract {schema, llm: true}`**: Produces a strict JSON extraction prompt for an external LLM client.
 - **`dom.visibleText {filterAny, filterLines}`**: Extracts visible text with Windows-safe comma filters.
@@ -171,7 +206,7 @@ OpenClaw Browser Bridge's anti-detection isn't just stealth scripts — every in
 
 | Aspect | Implementation |
 |---|---|
-| **Mouse trajectory** | Cubic Bézier with random arc, 24-90 steps adaptive to distance. Cursor position is tracked server-side, so each move starts from the real last position (no teleport from `(0,0)`). |
+| **Mouse trajectory** | Cubic Bezier with random arc, 24-90 steps adaptive to distance. Cursor position is tracked server-side, so each move starts from the real last position (no teleport from `(0,0)`). |
 | **Mouse velocity** | **Smoothstep easing** `t' = t²(3-2t)` — slow start, fast middle, slow end. Linear `t` was a strong bot signal (constant velocity). |
 | **Typing rhythm** | 40-160 ms per character, 3% chance of long pause (200-500 ms reflection). |
 | **Typos & correction** | ~2.5% chance of pressing a QWERTY-neighbor key, then `Backspace`, then the correct key. The strongest defeat for keystroke-pattern detectors. |
@@ -205,7 +240,7 @@ Twelve patches injected via `addInitScript` before any page script executes:
 | 8 | `Permissions.query` patched | `notifications` returns the real `Notification.permission` instead of leaking automation state. |
 | 9 | Canvas fingerprint noise | Imperceptible per-session noise on `toDataURL` / `toBlob` defeats exact-hash fingerprinting. |
 | 10 | WebGL `getParameter` | Returns `Google Inc. (Intel)` / `ANGLE Intel UHD Graphics 620 D3D11` for `UNMASKED_VENDOR_WEBGL` / `UNMASKED_RENDERER_WEBGL`. |
-| 11 | `outerWidth/outerHeight` | Cohérents avec `innerWidth + 16/88` if `0` (headless signal). |
+| 11 | `outerWidth/outerHeight` | Consistent with `innerWidth + 16/88` when `0` (headless signal). |
 | 12 | Playwright globals | `__playwright`, `__pw_manual`, `__pwInitScripts` deleted. |
 
 For aggressive anti-bots (Google, Cloudflare): **always set `CHROME_PROFILE` to a real Chrome profile**. This is the strongest signal — the stealth script alone can't replicate cookie history, TLS/JA3 fingerprint, or browsing habits.
@@ -250,18 +285,22 @@ Every handler accepts `query` / `selector` / `text` (universal selector: XPath, 
 `input.mouseMove {x, y}` · `input.mouseDown / input.mouseUp {x?, y?, button?}` · `input.wheel {x?, y?, deltaX?, deltaY?}` · `input.keyDown / input.keyUp {key}` · `input.text {text}` · `input.focus` · `viewport.set {width, height}`
 
 ### Extraction (`handlers/extraction.ts`)
-`dom.extract {type?, schema?}` supports `search-results`, `form`, `article`, `table`, `google-maps`, and generic `listings`.
+`web.search {query, engine?, limit?, pages?, useForm?, organicOnly?}` runs a complete web search workflow and auto-paginates until enough deduplicated results are collected.
+`dom.extract {type?, schema?}` supports `search-results`, `form`, `article`, `table`, `google-maps`, generic `listings`, and marketplace cards.
 `dom.visibleText {query?, textFilter?, filterAny?, filterLines?, limit?, includeHidden?}`
 
 Windows-safe CLI filtering:
 ```powershell
 .\bridge.cmd visible-text --filter-any=Formation,IA,Marseille --filter-lines --limit=50
-.\bridge.cmd scan --steps=4 --filter-any=Restaurant,Adresse
+.\bridge.cmd scan --steps=4 --filter-any=Restaurant,Address
 ```
 
 Generic listing extraction:
 ```bash
 .\bridge.cmd extract listings
+.\bridge.cmd extract marketplace --limit=10
+.\bridge.cmd scrape --limit=10 --format=csv --out=results.csv
+.\bridge.cmd webSearch "chats asiatique" --limit=20 --engine=google
 ```
 
 ### Human behavior (`handlers/special.ts`)

@@ -82,7 +82,17 @@ export function startServer(port = 8080) {
   const http = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     try {
       const url = req.url ?? '/';
-      if (url === '/' || url === '/viewer' || url === '/viewer/') {
+      if (url === '/' || url === '/home' || url === '/home/') {
+        const html = await readFile(join(viewerDir, 'home.html'), 'utf8');
+        res.writeHead(200, {
+          'Content-Type': MIME['.html'],
+          'Content-Security-Policy': VIEWER_CSP,
+          ...SECURITY_HEADERS,
+        });
+        res.end(html);
+        return;
+      }
+      if (url === '/viewer' || url === '/viewer/') {
         const html = await readFile(join(viewerDir, 'index.html'), 'utf8');
         res.writeHead(200, {
           'Content-Type': MIME['.html'],

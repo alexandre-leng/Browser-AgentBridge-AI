@@ -1,0 +1,16 @@
+{
+  "steps": [
+    {
+      "cmd": "navigate",
+      "args": ["https://www.leboncoin.fr/recherche?text=cookeo"]
+    },
+    {
+      "cmd": "wait",
+      "args": ["2000"]
+    },
+    {
+      "cmd": "extract",
+      "args": ["marketplace", "--limit=10"]
+    }
+  ]
+}

@@ -1,11 +1,13 @@
 {
   "name": "openclaw-browser-bridge",
   "version": "3.2.4",
-  "description": "Pont de contrôle navigateur humain basé sur Playwright",
+  "description": "Human-paced browser control bridge based on Playwright",
   "type": "module",
   "bin": {
-    "openclaw-live": "dist/cli/live.js",
-    "openclaw-mcp": "dist/mcp.js"
+    "openclaw-browser-bridge": "./dist/cli/bridge.js",
+    "openclaw-bridge": "./dist/cli/bridge.js",
+    "openclaw-live": "./dist/cli/live.js",
+    "openclaw-mcp": "./dist/mcp.js"
   },
   "scripts": {
     "start": "tsx src/server.ts",

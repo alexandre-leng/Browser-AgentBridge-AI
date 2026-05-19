@@ -1,24 +1,59 @@
+# Browser Bridge API Reference
+
+Documented version: `3.2.0`.
+
+JSON-RPC commands are exposed over WebSocket at `/ws/browser-bridge`.
+
+Request format:
+
+```json
+{ "id": "<id>", "type": "<command>", "payload": { } }
+```
+
+**Total: 85 commands**
+
+## Authentication
+
+- `BRIDGE_TOKEN`: `Authorization: Bearer <token>` header, or `?token=`. Required when `BRIDGE_HOST` is not local.
+- `BRIDGE_ALLOWED_ORIGINS`: comma-separated list of allowed origins. Other origins are rejected.
+- `BRIDGE_ALLOW_EXEC_SCRIPT=1` plus `BRIDGE_ADMIN_TOKEN`: required for `exec.script`; pass the token in `payload.adminToken`.
+- `BRIDGE_ALLOW_FILE_URLS=1` plus `BRIDGE_ALLOWED_FILE_ROOTS`: required for `file:` navigation.
+
+## MCP
+
+Official MCP server over stdio: `npm run mcp`, or `openclaw-mcp` after build.
+
+Main MCP tools: `browser_status`, `navigate`, `annotate_page`, `click_ref`, `type_ref`, `extract_schema`, `web_search`, `inspect_forms`, `fill_form`, `submit_form`, `site_search`, `extract_marketplace`, `human_timing_get`, `human_timing_set`, and `human_antispam_check`.
+
+The low-level `browser_command` tool is disabled by default and can be enabled with `BRIDGE_MCP_ALLOW_RAW=1`.
+
+MCP resource: `api` (`openclaw://api`) exposes the registered bridge command list. MCP prompt: `browser_task` provides a ref-oriented browser task template.
+
+## Commands By Category
+
 ### `agent`
 
-| Commande | Paramètres | Description |
-|---|---|---|
-| `agent.click` | `{ref, double?: false, retry?: true}` | Clic humain sur élément #ref |
-| `agent.discoverScroll` | `{direction?, amount?}` | Scroll avec détection de contenu |
-| `agent.hover` | `{ref}` | Survol humain |
-| `agent.press` | `{key, ref?}` | Touche clavier |
-| `agent.scroll` | `{direction?, amount?}` | Scroll fluide |
-| `agent.search` | `{query, engine?}` | Recherche web |
-| `agent.select` | `{ref}` | Focus élément |
-| `agent.summary` | `{}` | Résumé page |
-| `agent.task` | `{goal}` | Tâche LLM |
-| `agent.tree` | `{}` | Arbre accessibilité |
-| `agent.type` | `{ref, text, clearFirst?: true}` | Saisie avec effacement préalable |
-| `agent.waitFor` | `{ref, timeout?}` | Attente élément
+- `agent.click`
+- `agent.discoverScroll`
+- `agent.hover`
+- `agent.press`
+- `agent.scroll`
+- `agent.search`
+- `agent.select`
+- `agent.summary`
+- `agent.task`
+- `agent.tree`
+- `agent.type`
+- `agent.waitFor`
 
 ### `browser`
 
 - `browser.close`
 - `browser.status`
+
+### `combo`
+
+- `combo.searchAndClick`
 
 ### `cookie`
 
@@ -27,29 +62,34 @@
 
 ### `dom`
 
-| Commande | Paramètres | Description |
-|---|---|---|
-| `dom.click` | `{query?, selector?, text?}` | Clic sur élément par sélecteur CSS, XPath ou texte |
-| `dom.doubleClick` | `{query?, selector?, text?}` | Double-clic |
-| `dom.extract` | `{type?, schema?, llm?}` | Extraction structurée |
-| `dom.fillForm` | `{query?, selector?}` | Remplit un formulaire |
-| `dom.goto` | `{url}` | Naviguer vers URL (simplifié) |
-| `dom.hover` | `{query?, selector?, text?}` | Survole un élément |
-| `dom.html` | `{query?, selector?}` | HTML interne d'un élément |
-| `dom.inspect` | `{query?, selector?}` | Inspecte un élément (tag, classes, attributs) |
-| `dom.press` | `{key, waitForNavigation?, timeout?: 10000}` | Presse une touche. `waitForNavigation` auto si Enter |
-| `dom.scrollDown` | `{amount?: number}` | Scroll vers le bas |
-| `dom.scrollUp` | `{amount?: number}` | Scroll vers le haut |
-| `dom.search` | `{query}` | Recherche sur le moteur actuel |
-| `dom.select` | `{query?, selector?, text?, value?}` | Sélectionne une option dans un `<select>` |
-| `dom.submit` | `{query?, selector?, timeout?: 10000}` | Soumet un formulaire |
-| `dom.type` | `{query?, selector?, value?, text?}` | Tape du texte dans un champ |
-| `dom.visibleText` | `{query?, textFilter?, filterAny?, filterLines?, limit?: 300, includeHidden?}` | Extrait le texte visible |
-| `dom.waitFor` | `{query?, selector?, text?, state?: "visible"\|"hidden"\|"attached", timeout?: 10000}` | Attend un état DOM |
+- `dom.click`
+- `dom.doubleClick`
+- `dom.extract`
+- `dom.fillForm`
+- `dom.goto`
+- `dom.hover`
+- `dom.html`
+- `dom.inspect`
+- `dom.press`
+- `dom.scrollDown`
+- `dom.scrollUp`
+- `dom.search`
+- `dom.select`
+- `dom.submit`
+- `dom.type`
+- `dom.visibleText`
+- `dom.waitFor`
 
 ### `exec`
 
 - `exec.script`
+
+### `form`
+
+- `form.fill`
+- `form.inspect`
+- `form.search`
+- `form.submit`
 
 ### `human`
 
@@ -81,172 +121,311 @@
 - `input.text`
 - `input.wheel`
 
-### `page`
-
-| Commande | Paramètres | Description |
-|---|---|---|
-| `page.annotate` | `{noImage?: boolean}` | Capture + éléments. `noImage` = 10x plus rapide |
-
 ### `misc`
 
-| Commande | Paramètres | Description |
-|---|---|---|
-| `misc.search` | `{query, engine?: "google"\|"bing"}` | Cherche sur un moteur |
-| `misc.wait` | `{ms}` | Pause |
+- `batch`
+- `navigate`
+- `ping`
+- `screenshot`
+- `search`
+- `wait`
 
-### `combo`
+### `page`
 
-| Commande | Paramètres | Description |
-|---|---|---|
-| `combo.searchAndClick` | `{query, engine?: "google"\|"bing"}` | Cherche + clique premier résultat |
+- `page.annotate`
 
 ### `script`
 
-| Commande | Paramètres | Description |
-|---|---|---|
-| `script.execute` | `{commands: [], sessionId?}` | Exécute plusieurs commandes batch |
-| `exec.script` | `{code, adminToken}` | Exécute du JS arbitraire (si autorisé) |
+- `script.execute`
+
+### `scrape`
+
+- `scrape.results`
 
 ### `session`
 
-| Commande | Paramètres | Description |
-|---|---|---|
-| `session.create` | `{sessionId, headless?: boolean, profileDir?: string}` | Crée un contexte navigateur isolé |
-| `session.list` | `{}` | Liste les sessions actives |
-| `browser.status` | `{}` | Statut du navigateur (sessions, mémoire) |
-| `browser.close` | `{}` | Ferme le navigateur |
-| `screenshot` | `{format?: "png"\|"jpg", fullPage?: boolean}` | Capture d'écran (URL + dataUrl) |
-| `cookie.get` | `{urls?: string[]}` | Récupère les cookies |
-| `cookie.set` | `{cookies}` | Définit des cookies |
+- `session.create`
+- `session.list`
 
 ### `tab`
 
-| Commande | Paramètres | Description |
-|---|---|---|
-| `tab.close` | `{index}` | Ferme un onglet |
-| `tab.list` | `{}` | Liste les onglets ouverts |
-| `tab.new` | `{url?: string}` | Nouvel onglet (optionnellement navigue) |
-| `tab.switch` | `{index}` | Change d'onglet |
+- `tab.close`
+- `tab.list`
+- `tab.new`
+- `tab.switch`
 
 ### `trace`
 
-| Commande | Paramètres | Description |
-|---|---|---|
-| `trace.artifacts` | `{}` | Liste les artifacts de trace disponibles |
-| `trace.list` | `{sessionId?: string}` | Liste les événements de trace d'une session |
-| `trace.save` | `{sessionId?: string}` | Sauvegarde la trace sur disque |
+- `trace.artifacts`
+- `trace.list`
+- `trace.save`
 
 ### `viewport`
 
-| Commande | Paramètres | Description |
-|---|---|---|
-| `viewport.set` | `{width, height}` | Redimensionne le viewport |
-
-### `batch`
-
-| Commande | Paramètres | Description |
-|---|---|---|
-| `batch` | `{commands: [], stopOnError?: boolean}` | Exécute plusieurs commandes en séquence |
-| `wait` | `{ms: number}` | Pause en millisecondes |
+- `viewport.set`
 
 ### `vision`
 
-- `vision.screenshot` — capture d'écran en base64 (`{}`)
-- `vision.start` — démarre le streaming temps réel (`{fps: number, annotate?: boolean}`)
-- `vision.stop` — arrête le streaming (`{}`)
-- `vision.frame` (event serveur) — image diffusée pendant le streaming (`{frame: base64, timestamp, md5}`)
+- `vision.screenshot`
+- `vision.start`
+- `vision.stop`
 
-## Commandes utiles
+### `web`
+
+- `web.search`
+
+## Useful Commands
+
+### `web.search`
+
+Runs a complete web search workflow from the browser: opens the search engine, uses the visible search form when possible, extracts structured results, paginates automatically, deduplicates URLs, and returns a run report.
+
+Payload:
+
+```json
+{
+  "query": "asian cats",
+  "engine": "google",
+  "limit": 20,
+  "pages": 3,
+  "organicOnly": false
+}
+```
+
+CLI:
+
+```bash
+node bridge-cli.cjs webSearch "asian cats" --limit=20 --engine=google
+```
+
+Associated MCP tool: `web_search`.
 
 ### `dom.visibleText`
 
-Extrait le texte réellement visible dans le DOM, élément par élément, même quand le contenu n'est pas exposé comme lien, bouton ou article. Utile pour des pages JavaScript comme Google Maps où un téléphone peut apparaître dans un simple `div` visible.
+Extracts text that is actually visible in the DOM, element by element, even when the content is not exposed as a link, button, or article. This is useful on JavaScript-heavy pages such as Google Maps, where a phone number can appear inside a plain visible `div`.
 
-Payload :
+Payload:
 
 ```json
 {
   "query": ".optional-root-css-selector",
-  "textFilter": "Numéro|06|Adresse",
-  "filterAny": ["Numéro", "06", "Adresse"],
+  "textFilter": "Phone|Address",
+  "filterAny": ["Phone", "Address"],
   "filterLines": true,
   "limit": 100,
   "includeHidden": false
 }
 ```
 
-`textFilter` reste une expression régulière. Sur Windows/PowerShell, préférez `filterAny` ou `--filter-any=a,b,c` pour éviter que `cmd.exe` interprète `|` comme un pipeline avant que Node reçoive l'argument. `filterLines` filtre ligne par ligne après extraction.
+`textFilter` remains a regular expression. On Windows and PowerShell, prefer `filterAny` or `--filter-any=a,b,c` so `cmd.exe` cannot interpret `|` as a pipeline before Node receives the argument. `filterLines` filters line by line after extraction.
 
-Réponse :
+Response:
 
 ```json
-{ "type": "visible-text", "count": 1, "items": [{ "text": "06 58 47 70 24", "tag": "div", "selector": "div.Io6YTe.fontBodyMedium.kR99db", "box": { "x": 500, "y": 662, "w": 402, "h": 40 } }] }
+{
+  "type": "visible-text",
+  "count": 1,
+  "items": [
+    {
+      "text": "+33 6 58 47 70 24",
+      "tag": "div",
+      "selector": "div.Io6YTe.fontBodyMedium.kR99db",
+      "box": { "x": 500, "y": 662, "w": 402, "h": 40 }
+    }
+  ]
+}
 ```
 
-CLI :
+CLI:
 
 ```bash
-node bridge-cli.cjs visibleText --filter-any=Numéro,06,Adresse --filter-lines --limit=50
-# alias accepté
-node bridge-cli.cjs visible-text --filter-any=Numéro,06,Adresse --filter-lines --limit=50
+node bridge-cli.cjs visibleText --filter-any=Phone,Address --filter-lines --limit=50
+node bridge-cli.cjs visible-text --filter-any=Phone,Address --filter-lines --limit=50
 ```
 
-### `dom.extract` avec `type: "listings"`
+### `dom.extract` With `type: "listings"`
 
-Extrait une liste structurée depuis des cartes de résultats, annuaires, Google Maps, Pages Jaunes ou pages de listings génériques.
+Extracts a structured list from result cards, directories, Google Maps, Yellow Pages, or generic listing pages.
 
-Payload :
+Payload:
 
 ```json
 { "type": "listings" }
 ```
 
-Réponse :
+Response:
 
 ```json
 {
   "type": "listings",
   "listings": [
     {
-      "name": "Ottho - Formation No Code et IA",
+      "name": "Ottho - No Code and AI Training",
       "rating": 5,
       "reviews": 186,
       "address": "11 Rue Montgrand, Marseille",
-      "phone": "07 57 59 77 84",
+      "phone": "+33 7 57 59 77 84",
       "website": "https://...",
-      "hours": "Ouvert · Ferme à 18:00",
-      "summary": "Excellente expérience..."
+      "hours": "Open - Closes at 18:00",
+      "summary": "Excellent experience..."
     }
   ]
 }
 ```
 
-CLI :
+CLI:
 
 ```bash
 node bridge-cli.cjs extract listings
 ```
 
-### Capacités humaines
+### Forms And Authenticated Site Search
 
-- `human.timing.get` retourne le profil de timings de consultation actif.
-- `human.timing.set` ajuste à chaud les timings (`consultSpeed`, WPM, min/max, cadence de feedback) pour ralentir ou accélérer les consultations sans redémarrage.
-- `human.timing.reset` restaure le profil par défaut.
-- `human.antispam.check` inspecte la page et renvoie un warning structuré au lieu de lancer une erreur.
-- `human.scan` lit le texte visible, scrolle lentement, puis relit. Il accepte `textFilter`, `filterAny`, et `filterLines`.
-- `human.findText` cherche un texte visible et scrolle si besoin, avec un timeout global borné via `timeoutMs`.
-- `human.clickText` cherche un texte visible, logue les étapes (`finding`, `coordinates`, `clicking`) et clique au centre de l'élément trouvé. Si le clic coordonné échoue, il tente un fallback par `agent.click` sur un ref annoté.
-- `human.idle` déplace doucement la souris et marque des pauses de lecture.
-- `human.jitter` ajoute de petites hésitations autour de la position courante.
-- `human.skim` parcourt une page avec scrolls progressifs, pauses et petits retours en arrière.
-- `human.backtrack` remonte légèrement, utile quand un humain relit une zone.
-- `human.focusCycle` parcourt les éléments focusables au clavier avec `Tab`.
-- `human.goBack` / `human.goForward` utilisent l'historique avec pause humaine.
+These commands help an agent work inside a legitimate browser session, for example a site that is already signed in through `CHROME_PROFILE` or `CHROME_CDP_URL`. They do not bypass captchas, anti-bot blocks, or access controls. If a site asks for human intervention, complete that step in the visible browser.
 
-CLI :
+#### `form.inspect`
+
+Maps visible forms and fields on the active page: labels, names, placeholders, types, selectors, list options, and required/disabled state.
+
+```json
+{ "id": "f1", "type": "form.inspect", "payload": {} }
+```
+
+#### `form.fill`
+
+Fills fields either by selector or by logical name (`label` or `name`). Supports text fields, textareas, selects, checkboxes, radio buttons, and file inputs.
+
+```json
+{
+  "id": "f2",
+  "type": "form.fill",
+  "payload": {
+    "values": {
+      "Search": "supplier invoices April 2026",
+      "Status": "Paid",
+      "Include archives": true
+    }
+  }
+}
+```
+
+Detailed format:
+
+```json
+{
+  "fields": [
+    { "label": "Name", "value": "Durand" },
+    { "selector": "input[name='date']", "value": "2026-05-19" }
+  ],
+  "clearFirst": true
+}
+```
+
+#### `form.submit`
+
+Submits the active form by clicking a given button, detecting a common submit button, or pressing Enter.
+
+```json
+{ "id": "f3", "type": "form.submit", "payload": { "query": "Search" } }
+```
+
+#### `form.search`
+
+Automatically finds the visible search field on the active page, types the query, then submits. This is the most convenient command for searching inside an intranet, CRM, mailbox, or already-authenticated portal.
+
+```json
+{
+  "id": "s1",
+  "type": "form.search",
+  "payload": {
+    "query": "supplier contract 2026",
+    "field": "Search"
+  }
+}
+```
+
+Associated MCP tools: `inspect_forms`, `fill_form`, `submit_form`, `site_search`.
+
+### Marketplace Extraction
+
+`dom.extract` accepts `type: "marketplace"` for classified-ad and marketplace result pages. The extractor combines DOM hints with visible text, removes `style/script` noise, deduplicates cards, respects `limit`, and can return JSON or CSV.
+
+Payload:
+
+```json
+{
+  "type": "marketplace",
+  "limit": 10,
+  "format": "json"
+}
+```
+
+Response:
+
+```json
+{
+  "type": "marketplace",
+  "count": 1,
+  "items": [
+    {
+      "title": "Cookeo Touch Wifi",
+      "price": "180 EUR",
+      "location": "Puteaux 92800",
+      "category": "Home appliances",
+      "delivery": false,
+      "sponsored": false,
+      "url": "https://www.leboncoin.fr/ad/electromenager/...",
+      "image": "https://...",
+      "summary": "Cookeo Touch Wifi 180 EUR ..."
+    }
+  ]
+}
+```
+
+Dedicated command:
+
+```json
+{
+  "id": "m1",
+  "type": "scrape.results",
+  "payload": {
+    "type": "marketplace",
+    "limit": 10,
+    "format": "csv"
+  }
+}
+```
+
+CLI:
 
 ```bash
-node bridge-cli.cjs scan --steps=4 --filter-any=Restaurant,Adresse,Numéro
+node bridge-cli.cjs extract marketplace --limit=10
+node bridge-cli.cjs scrape --limit=10 --format=csv --out=results.csv
+openclaw-bridge extract marketplace --limit=10 --format=json
+```
+
+Associated MCP tool: `extract_marketplace`.
+
+### Human Capabilities
+
+- `human.timing.get` returns the active consultation timing profile.
+- `human.timing.set` adjusts timing live (`consultSpeed`, WPM, min/max, feedback cadence) to slow down or speed up page consultation without restarting.
+- `human.timing.reset` restores the default profile.
+- `human.antispam.check` inspects the page and returns a structured warning instead of throwing.
+- `human.scan` reads visible text, scrolls slowly, then reads again. It accepts `textFilter`, `filterAny`, and `filterLines`.
+- `human.findText` searches visible text and scrolls if needed, with a global bounded timeout via `timeoutMs`.
+- `human.clickText` searches visible text, logs stages (`finding`, `coordinates`, `clicking`), then clicks the center of the found element. If the coordinate click fails, it attempts an `agent.click` fallback on an annotated ref.
+- `human.idle` gently moves the mouse and pauses like a reader.
+- `human.jitter` adds small hesitation movements around the current cursor position.
+- `human.skim` scans a page with progressive scrolls, pauses, and small backtracks.
+- `human.backtrack` scrolls slightly upward, useful when rereading a zone.
+- `human.focusCycle` cycles focusable elements with `Tab`.
+- `human.goBack` / `human.goForward` use browser history with a human pause.
+
+CLI:
+
+```bash
+node bridge-cli.cjs scan --steps=4 --filter-any=Restaurant,Address,Phone
 node bridge-cli.cjs find-text "Le Ramus"
 node bridge-cli.cjs click-text "Le Ramus" --timeout-ms=15000
 node bridge-cli.cjs idle 2500
@@ -259,11 +438,11 @@ node bridge-cli.cjs timing set consultSpeed=1.6 minFocusedMs=3500 feedbackInterv
 node bridge-cli.cjs antispam
 ```
 
-### Profil de timing humain
+### Human Timing Profile
 
-Le profil de timing contrôle uniquement les temps de consultation : lecture, scan, relecture d'un résultat trouvé. Les mouvements de souris, clics et saisies gardent leurs propres modèles humains.
+The timing profile only controls consultation delays: reading, scanning, and rereading a found result. Mouse movement, clicks, and typing keep their own human-like models.
 
-Payload `human.timing.set` :
+Payload for `human.timing.set`:
 
 ```json
 {
@@ -280,16 +459,16 @@ Payload `human.timing.set` :
 }
 ```
 
-| Champ | Effet | Conseil |
+| Field | Effect | Guidance |
 |---|---|---|
-| `consultSpeed` | Multiplie tous les temps de consultation | `1` normal, `1.5` plus lent, `0.75` plus rapide |
-| `focusedWpmMin` / `focusedWpmMax` | Vitesse de lecture attentive | Baisser les WPM allonge les pauses |
-| `skimWpmMin` / `skimWpmMax` | Vitesse de scan rapide | À garder plus haut que le focused WPM |
-| `minFocusedMs` / `maxFocusedMs` | Bornes de pause pour `human.read` focalisé | Augmenter sur les sites sensibles |
-| `minSkimMs` / `maxSkimMs` | Bornes de pause pour scan et recherche textuelle | Utile pour listes longues |
-| `feedbackIntervalMs` | Fréquence des événements `human.feedback` | 500-1500 ms donne un bon retour temps réel |
+| `consultSpeed` | Multiplies all consultation delays | `1` normal, `1.5` slower, `0.75` faster |
+| `focusedWpmMin` / `focusedWpmMax` | Careful reading speed | Lower WPM extends pauses |
+| `skimWpmMin` / `skimWpmMax` | Fast scanning speed | Keep higher than focused WPM |
+| `minFocusedMs` / `maxFocusedMs` | Pause bounds for focused `human.read` | Increase on sensitive sites |
+| `minSkimMs` / `maxSkimMs` | Pause bounds for scanning and text search | Useful for long lists |
+| `feedbackIntervalMs` | `human.feedback` event cadence | 500-1500 ms gives good real-time feedback |
 
-Réponse typique :
+Typical response:
 
 ```json
 {
@@ -303,11 +482,11 @@ Réponse typique :
 }
 ```
 
-### Feedback temps réel
+### Real-Time Feedback
 
-Pendant `human.read`, `human.scan` et `human.findText`, le bridge diffuse des événements WebSocket `human.feedback`. Ils ne remplacent pas la réponse finale de la commande : ils servent à piloter une boucle d'agent pendant que la consultation est encore en cours.
+During `human.read`, `human.scan`, and `human.findText`, the bridge broadcasts WebSocket `human.feedback` events. They do not replace the final command response; they help an agent loop adapt while the consultation is still running.
 
-Exemple d'événement :
+Example event:
 
 ```json
 {
@@ -325,23 +504,23 @@ Exemple d'événement :
 }
 ```
 
-Phases courantes :
+Common phases:
 
-- `consulting` : pause de lecture ou relecture en cours.
-- `consulted` : consultation terminée.
-- `scrolling` : déplacement de page avant une nouvelle lecture.
-- `timing.updated` / `timing.reset` : profil modifié à chaud.
-- `antispam.ok` / `antispam.warning` : résultat d'un check anti-spam.
+- `consulting`: reading or rereading pause in progress.
+- `consulted`: consultation finished.
+- `scrolling`: page movement before another read.
+- `timing.updated` / `timing.reset`: live timing profile change.
+- `antispam.ok` / `antispam.warning`: anti-spam check result.
 
-### Boucle agent recommandée
+### Recommended Agent Loop
 
-1. Lire le profil avec `human.timing.get` au début d'une session longue.
-2. Après une navigation, préférer `human.read` ou `human.scan` avant de cliquer à nouveau.
-3. Sur plusieurs `human.feedback` rapides ou une page sensible, appeler `human.timing.set` avec `consultSpeed` plus élevé et des minimums plus longs.
-4. Appeler `human.antispam.check` après les recherches répétées, les pages de résultats, ou tout comportement inhabituel.
-5. Si `blocked: true`, arrêter l'automation et passer en intervention humaine. Le bridge n'est pas conçu pour contourner les protections.
+1. Read the profile with `human.timing.get` at the start of a long session.
+2. After navigation, prefer `human.read` or `human.scan` before clicking again.
+3. On repeated rapid `human.feedback` events or a sensitive page, call `human.timing.set` with a higher `consultSpeed` and longer minimums.
+4. Call `human.antispam.check` after repeated searches, result pages, or unusual behavior.
+5. If `blocked: true`, stop automation and hand off to a human. The bridge is not designed to bypass protections.
 
-Exemple WebSocket complet :
+Full WebSocket example:
 
 ```json
 { "id": "t1", "type": "human.timing.set", "payload": { "consultSpeed": 1.8, "minFocusedMs": 4000 } }
@@ -349,35 +528,34 @@ Exemple WebSocket complet :
 { "id": "a1", "type": "human.antispam.check", "payload": {} }
 ```
 
-## Variables d'environnement
+## Environment Variables
 
-| Variable | Rôle | Défaut |
+| Variable | Role | Default |
 |---|---|---|
-| `PORT` | port HTTP/WS | 8080 |
-| `BRIDGE_HOST` | host de bind | 127.0.0.1 |
-| `BRIDGE_URL` | URL WebSocket utilisée par le CLI TypeScript | `ws://localhost:8080/ws/browser-bridge` |
-| `BRIDGE_TOKEN` | token d'auth WS, obligatoire hors localhost | (vide autorisé localement) |
-| `BRIDGE_ADMIN_TOKEN` | token pour `exec.script` | (vide = commande désactivée) |
-| `BRIDGE_ALLOW_EXEC_SCRIPT` | active `exec.script` si `1` | 0 |
-| `BRIDGE_ALLOW_FILE_URLS` | active navigation `file:` si `1` | 0 |
-| `BRIDGE_ALLOWED_FILE_ROOTS` | CSV de racines autorisées pour `file:` | (vide) |
-| `CHROME_CHANNEL` | canal navigateur Playwright (`chrome`, `chromium`, `msedge`) | chrome |
-| `CHROME_PROFILE` | dossier de profil persistant Chromium/Chrome | (vide = contexte neuf) |
-| `CHROME_CDP_URL` | endpoint CDP pour se connecter à un navigateur existant | (vide) |
-| `BRIDGE_PLAYWRIGHT_SLOWMO_MS` | ralentissement Playwright appliqué aux actions bas niveau | 0 |
-| `BRIDGE_BRING_TO_FRONT` | remet la page active au premier plan (`0` désactive) | 1 |
-| `BRIDGE_POLITE_MODE` | ralentissement par domaine + détection anti-bot (`0` désactive) | 1 |
-| `BRIDGE_POLITE_MIN_DELAY_MS` | délai minimum entre navigations vers le même host | 12000 |
-| `BRIDGE_AUTO_COOKIES` | gestion automatique des bannières cookies connues (`0` désactive) | 1 |
-| `BRIDGE_HUMAN_WARMUP` | mouvements/pauses humaines après navigation (`0` désactive) | 1 |
-| `BRIDGE_PAGE_WARMUP_MS` | durée du warmup humain après navigation | 2500 |
-| `BRIDGE_HUMAN_CONSULT_SPEED` | multiplicateur initial des temps de consultation humaine | `BRIDGE_DEMO_SPEED` ou 1 |
-| `BRIDGE_DEMO_SPEED` | multiplicateur général des mouvements/pauses de démonstration | 1 |
-| `BRIDGE_VISIBLE_CURSOR` | affiche le curseur visuel injecté (`0` désactive) | 1 |
-| `BRIDGE_ALLOWED_ORIGINS` | CSV origines autorisées | (vide = toutes) |
-| `BRIDGE_DEFAULT_TIMEOUT_MS` | timeout défaut Playwright | 15000 |
-| `BRIDGE_DEFAULT_NAV_TIMEOUT_MS` | timeout nav défaut | 20000 |
-| `BRIDGE_LOG_JSON` | logs JSON si `1` | 0 |
-| `BRIDGE_LOG_LEVEL` | niveau min logs | info |
-| `BRIDGE_MCP_ALLOW_RAW` | expose l'outil MCP brut `browser_command` si `1` | 0 |
-
+| `PORT` | HTTP/WS port | 8080 |
+| `BRIDGE_HOST` | Bind host | 127.0.0.1 |
+| `BRIDGE_URL` | WebSocket URL used by the TypeScript CLI | `ws://localhost:8080/ws/browser-bridge` |
+| `BRIDGE_TOKEN` | WebSocket auth token, required outside localhost | empty, allowed locally |
+| `BRIDGE_ADMIN_TOKEN` | Token for `exec.script` | empty = command disabled |
+| `BRIDGE_ALLOW_EXEC_SCRIPT` | Enables `exec.script` when `1` | 0 |
+| `BRIDGE_ALLOW_FILE_URLS` | Enables `file:` navigation when `1` | 0 |
+| `BRIDGE_ALLOWED_FILE_ROOTS` | Comma-separated allowed roots for `file:` | empty |
+| `CHROME_CHANNEL` | Playwright browser channel (`chrome`, `chromium`, `msedge`) | chrome |
+| `CHROME_PROFILE` | Persistent Chromium/Chrome profile directory | empty = fresh context |
+| `CHROME_CDP_URL` | CDP endpoint for connecting to an existing browser | empty |
+| `BRIDGE_PLAYWRIGHT_SLOWMO_MS` | Slowdown applied to low-level Playwright actions | 0 |
+| `BRIDGE_BRING_TO_FRONT` | Brings the active page to the front (`0` disables) | 1 |
+| `BRIDGE_POLITE_MODE` | Per-domain slowdown and anti-bot detection (`0` disables) | 1 |
+| `BRIDGE_POLITE_MIN_DELAY_MS` | Minimum delay between navigations to the same host | 12000 |
+| `BRIDGE_AUTO_COOKIES` | Automatic handling of known cookie banners (`0` disables) | 1 |
+| `BRIDGE_HUMAN_WARMUP` | Human movements and pauses after navigation (`0` disables) | 1 |
+| `BRIDGE_PAGE_WARMUP_MS` | Human warmup duration after navigation | 2500 |
+| `BRIDGE_HUMAN_CONSULT_SPEED` | Initial human consultation multiplier | `BRIDGE_DEMO_SPEED` or 1 |
+| `BRIDGE_DEMO_SPEED` | General demonstration movement/pause multiplier | 1 |
+| `BRIDGE_VISIBLE_CURSOR` | Shows the injected visual cursor (`0` disables) | 1 |
+| `BRIDGE_ALLOWED_ORIGINS` | Comma-separated allowed origins | empty = all |
+| `BRIDGE_DEFAULT_TIMEOUT_MS` | Default Playwright timeout | 15000 |
+| `BRIDGE_DEFAULT_NAV_TIMEOUT_MS` | Default navigation timeout | 20000 |
+| `BRIDGE_LOG_JSON` | JSON logs when `1` | 0 |
+| `BRIDGE_LOG_LEVEL` | Minimum log level | info |
+| `BRIDGE_MCP_ALLOW_RAW` | Exposes raw MCP tool `browser_command` when `1` | 0 |

@@ -1,0 +1,16 @@
+{
+  "steps": [
+    {
+      "cmd": "navigate",
+      "args": ["https://www.example.com"]
+    },
+    {
+      "cmd": "wait",
+      "args": ["1500"]
+    },
+    {
+      "cmd": "siteSearch",
+      "args": ["supplier contract 2026", "--field=Search"]
+    }
+  ]
+}

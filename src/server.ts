@@ -9,10 +9,22 @@ import { startServer } from './transport/ws.js';
 import { controller } from './browser/controller.js';
 
 const port = Number(process.env.PORT ?? 8080);
+const host = process.env.BRIDGE_HOST ?? '127.0.0.1';
+const homeUrl = process.env.BRIDGE_HOME_URL ?? `http://${host}:${port}/home`;
 
 const headless = process.env.BRIDGE_HEADLESS !== 'false';
 await controller.launch({ headless });
 startServer(port);
+setTimeout(async () => {
+  try {
+    const page = await controller.page();
+    if (page.url() === 'about:blank') {
+      await page.goto(homeUrl, { waitUntil: 'domcontentloaded' });
+    }
+  } catch (err: any) {
+    log('warn', 'failed to open bridge home page', { error: err?.message ?? String(err), homeUrl });
+  }
+}, 250);
 import { log } from './logger.js';
 
 const shutdown = async () => {

@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { WebSocket } from 'ws';
 import readline from 'node:readline';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { installTargets, parseInstallArgs } from './install.js';
 
 const WS_URL = process.env.BRIDGE_URL || 'ws://localhost:8080/ws/browser-bridge';
 
@@ -43,6 +45,24 @@ function csvTerms(value: string | undefined) {
   return value ? value.split(',').map(s => s.trim()).filter(Boolean) : undefined;
 }
 
+function optionParts(pParts: string[]) {
+  const opt = (name: string) => optValue(pParts, name);
+  return {
+    limit: Number(opt('--limit')) || undefined,
+    format: opt('--format'),
+    engine: opt('--engine'),
+    pages: Number(opt('--pages')) || undefined,
+    out: opt('--out'),
+    positional: pParts.filter((part, i) => {
+      if (part.startsWith('--limit=') || part.startsWith('--format=') || part.startsWith('--out=')) return false;
+      if (part.startsWith('--engine=') || part.startsWith('--pages=')) return false;
+      if (['--limit', '--format', '--out', '--engine', '--pages'].includes(part)) return false;
+      if (['--limit', '--format', '--out', '--engine', '--pages'].includes(pParts[i - 1])) return false;
+      return true;
+    }),
+  };
+}
+
 export function mapCommand(type: string, pParts: string[]): any {
   switch (type) {
     case 'navigate': return { type: 'navigate', payload: { url: pParts[0], autoAnnotate: pParts.includes('--annotate'), timeout: Number(pParts.find(p => p.startsWith('--timeout='))?.split('=')?.[1]) || 30000 } };
@@ -65,7 +85,47 @@ export function mapCommand(type: string, pParts: string[]): any {
       }
       return { type: 'wait', payload: { ms: Number(pParts[0]) || 1000 } };
     case 'annotate': return { type: 'page.annotate', payload: { noImage: pParts.includes('--no-image') } };
-    case 'extract': return { type: 'dom.extract', payload: { type: pParts[0]?.startsWith('--type') ? pParts[0].split('=')[1] : (pParts[0] || pParts[1]) } };
+    case 'extract': {
+      const opts = optionParts(pParts);
+      return {
+        type: 'dom.extract',
+        payload: {
+          type: opts.positional[0]?.startsWith('--type') ? opts.positional[0].split('=')[1] : (opts.positional[0] || opts.positional[1]),
+          limit: opts.limit,
+          format: opts.format,
+        },
+      };
+    }
+    case 'scrape': {
+      const opts = optionParts(pParts);
+      return { type: 'scrape.results', payload: { type: 'marketplace', limit: opts.limit, format: opts.format } };
+    }
+    case 'web-search':
+    case 'webSearch': {
+      const opts = optionParts(pParts);
+      return {
+        type: 'web.search',
+        payload: {
+          query: opts.positional.filter(part => part !== '--direct' && part !== '--organic').join(' '),
+          limit: opts.limit,
+          engine: opts.engine,
+          pages: opts.pages,
+          useForm: !pParts.includes('--direct'),
+          organicOnly: pParts.includes('--organic'),
+        },
+      };
+    }
+    case 'site-search':
+    case 'siteSearch': {
+      const field = optValue(pParts, '--field');
+      const query = pParts.filter((part, i) => {
+        if (part.startsWith('--field=')) return false;
+        if (part === '--field') return false;
+        if (pParts[i - 1] === '--field') return false;
+        return true;
+      }).join(' ');
+      return { type: 'form.search', payload: { query, field } };
+    }
     case 'visible-text': return { type: 'dom.visibleText', payload: {
       textFilter: optValue(pParts, '--filter'),
       filterAny: csvTerms(optValue(pParts, '--filter-any')),
@@ -132,8 +192,56 @@ export function mapCommand(type: string, pParts: string[]): any {
           returnAllResults: true
         }
       };
+    case 'script':
+      return {
+        type: 'script.execute',
+        payload: {
+          commands: loadScriptCommands(pParts[0]),
+          returnAllResults: true
+        }
+      };
     default: return null;
   }
+}
+
+function commandFromScriptStep(step: any) {
+  if (typeof step === 'string') {
+    const parts = parseArgs(step);
+    return mapCommand(parts[0], parts.slice(1));
+  }
+  if (!step || typeof step !== 'object') return null;
+  if (typeof step.command === 'string') {
+    const parts = parseArgs(step.command);
+    return mapCommand(parts[0], parts.slice(1));
+  }
+  if (typeof step.type === 'string' && step.payload && typeof step.payload === 'object') {
+    return { type: step.type, payload: step.payload };
+  }
+
+  const { type, ...rest } = step;
+  if (typeof type !== 'string') return null;
+  switch (type) {
+    case 'navigate': return mapCommand('navigate', [String(rest.url ?? '')]);
+    case 'annotate': return mapCommand('annotate', rest.noImage ? ['--no-image'] : []);
+    case 'click': return mapCommand('click', [String(rest.ref ?? rest.query ?? '')]);
+    case 'type': return mapCommand('type', [String(rest.ref ?? rest.query ?? ''), String(rest.text ?? '')]);
+    case 'press': return mapCommand('press', [String(rest.key ?? '')]);
+    case 'wait': return mapCommand('wait', [String(rest.ms ?? rest.durationMs ?? 1000)]);
+    case 'scroll': return mapCommand('scroll', [String(rest.amount ?? 600)]);
+    case 'extract': return mapCommand('extract', [String(rest.extractType ?? rest.kind ?? rest.value ?? 'article')]);
+    case 'summary': return mapCommand('summary', []);
+    default: return null;
+  }
+}
+
+export function loadScriptCommands(filePath: string): any[] {
+  if (!filePath) throw new Error('Usage: script <file.json>');
+  const data = JSON.parse(readFileSync(filePath, 'utf8'));
+  const steps = Array.isArray(data) ? data : data.steps;
+  if (!Array.isArray(steps)) throw new Error('Script file must be an array or contain a steps array');
+  const commands = steps.map(commandFromScriptStep).filter(Boolean);
+  if (commands.length === 0) throw new Error('Script file did not contain any supported steps');
+  return commands;
 }
 
 async function startRepl() {
@@ -178,10 +286,28 @@ async function main() {
     return startRepl();
   }
 
+  if (filteredArgs[0] === 'start') {
+    await import('../server.js');
+    return;
+  }
+
+  if (filteredArgs[0] === 'install') {
+    try {
+      const { target, options } = parseInstallArgs(filteredArgs.slice(1));
+      const results = installTargets(target, options);
+      console.log(JSON.stringify({ ok: true, installed: results }, null, flags.quiet ? 0 : 2));
+      return;
+    } catch (err: any) {
+      console.error(JSON.stringify({ ok: false, error: err?.message ?? String(err) }));
+      process.exit(1);
+    }
+  }
+
   const ws = new WebSocket(WS_URL);
   const type = filteredArgs[0];
   const payloadParts = filteredArgs.slice(1);
   const command = mapCommand(type, payloadParts);
+  const outputFile = optionParts(payloadParts).out;
 
   if (!command) {
     console.error(JSON.stringify({ ok: false, error: `Unknown command: ${type}` }));
@@ -225,6 +351,13 @@ async function main() {
       
       delete out.imageB64;
       delete out.image;
+      if (outputFile && (command.type === 'dom.extract' || command.type === 'scrape.results')) {
+        const content = command.payload?.format === 'csv' && res.csv ? res.csv : JSON.stringify(res, null, 2);
+        writeFileSync(outputFile, content, 'utf8');
+        console.log(JSON.stringify({ ok: true, saved: outputFile, count: res.count ?? res.items?.length ?? 0 }, null, flags.quiet ? 0 : 2));
+        ws.close();
+        process.exit(0);
+      }
       console.log(JSON.stringify(out, null, flags.quiet ? 0 : 2));
       ws.close();
       process.exit(0);

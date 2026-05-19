@@ -59,12 +59,13 @@ All commands are sent as JSON over WebSocket to `/ws/browser-bridge`.
 
 | Type | Description |
 | :--- | :--- |
-| `search-results` | Extrait titles, URLs, and snippets from search engines. |
+| `search-results` | Extracts titles, URLs, and snippets from search engines. |
 | `form` | Lists all input fields, select boxes, and textareas with labels. |
 | `table` | Parses tabular data into a 2D array. |
 | `article` | Extracts the main title and text body (cleaning up ads/nav). |
 | `google-maps` | Specialized extractor for local business listings and maps. |
 | `listings` | Generic structured listing extractor for maps, directories, yellow pages, and result cards. |
+| `marketplace` | Marketplace/listing-card extractor with title, price, location, category, delivery, sponsored flag, URL, image, cleanup, dedupe, `limit`, and JSON/CSV output. |
 
 `listings` returns:
 
@@ -73,13 +74,13 @@ All commands are sent as JSON over WebSocket to `/ws/browser-bridge`.
   "type": "listings",
   "listings": [
     {
-      "name": "Ottho - Formation No Code et IA",
+      "name": "Ottho - No Code and AI Training",
       "rating": 5,
       "reviews": 186,
       "address": "11 Rue Montgrand, Marseille",
       "phone": "07 57 59 77 84",
       "website": "https://...",
-      "hours": "Ouvert · Ferme à 18:00",
+      "hours": "Open - Closes at 18:00",
       "summary": "..."
     }
   ]
@@ -103,6 +104,28 @@ All commands are sent as JSON over WebSocket to `/ws/browser-bridge`.
 | `dom.inspect` | `{query?, selector?}` | Returns element tag, classes, attributes. |
 
 ---
+
+`marketplace` returns:
+
+```json
+{
+  "type": "marketplace",
+  "count": 10,
+  "items": [
+    {
+      "title": "Cookeo Touch Wifi",
+      "price": "180 €",
+      "location": "Puteaux 92800",
+      "category": "Home appliances",
+      "delivery": false,
+      "sponsored": false,
+      "url": "https://www.leboncoin.fr/ad/electromenager/...",
+      "image": "https://...",
+      "summary": "Cookeo Touch Wifi 180 € ..."
+    }
+  ]
+}
+```
 
 ### ⌨️ Raw Input Module (`input.*`)
 *Low-latency primitives used by the Viewer for manual takeover.*

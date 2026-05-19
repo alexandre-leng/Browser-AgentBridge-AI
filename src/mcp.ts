@@ -101,6 +101,84 @@ server.registerTool('type_ref', {
   return asText(await dispatch('agent.type', args));
 });
 
+server.registerTool('inspect_forms', {
+  title: 'Inspect forms',
+  description: 'Map visible forms and fields on the active page, including labels, names, placeholders, types, selectors, and options.',
+  inputSchema: {
+    sessionId: z.string().optional(),
+  },
+}, async (args) => {
+  await ensureBrowser();
+  return asText(await dispatch('form.inspect', args));
+});
+
+server.registerTool('fill_form', {
+  title: 'Fill form',
+  description: 'Fill visible form fields by selector/query or by logical label/name. Works with text, textarea, select, checkbox, radio, and file inputs.',
+  inputSchema: {
+    values: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.array(z.string())])).optional(),
+    fields: z.array(z.object({
+      query: z.string().optional(),
+      selector: z.string().optional(),
+      label: z.string().optional(),
+      name: z.string().optional(),
+      value: z.union([z.string(), z.number(), z.boolean(), z.array(z.string())]),
+    })).optional(),
+    clearFirst: z.boolean().optional(),
+    sessionId: z.string().optional(),
+  },
+}, async (args) => {
+  await ensureBrowser();
+  return asText(await dispatch('form.fill', args));
+});
+
+server.registerTool('submit_form', {
+  title: 'Submit form',
+  description: 'Submit the active form by clicking a submit/search button or pressing Enter.',
+  inputSchema: {
+    query: z.string().optional(),
+    selector: z.string().optional(),
+    timeout: z.number().optional(),
+    sessionId: z.string().optional(),
+  },
+}, async (args) => {
+  await ensureBrowser();
+  return asText(await dispatch('form.submit', args));
+});
+
+server.registerTool('site_search', {
+  title: 'Search current site',
+  description: 'Find and use the current page search form. Useful for authenticated sites already opened in a persistent browser session.',
+  inputSchema: {
+    query: z.string().min(1),
+    field: z.string().optional(),
+    submit: z.string().optional(),
+    timeout: z.number().optional(),
+    sessionId: z.string().optional(),
+  },
+}, async (args) => {
+  await ensureBrowser();
+  return asText(await dispatch('form.search', args));
+});
+
+server.registerTool('web_search', {
+  title: 'Search the web',
+  description: 'Search Google, Bing, or DuckDuckGo, automatically paginate until the requested number of deduplicated results is collected, and return a run report.',
+  inputSchema: {
+    query: z.string().min(1),
+    engine: z.enum(['google', 'bing', 'duckduckgo']).optional(),
+    limit: z.number().min(1).max(100).optional(),
+    pages: z.number().min(1).max(10).optional(),
+    useForm: z.boolean().optional(),
+    organicOnly: z.boolean().optional(),
+    timeout: z.number().optional(),
+    sessionId: z.string().optional(),
+  },
+}, async (args) => {
+  await ensureBrowser();
+  return asText(await dispatch('web.search', args));
+});
+
 server.registerTool('extract_schema', {
   title: 'Extract with schema',
   description: 'Extract structured data using CSS selectors from schema.fields.',
@@ -112,6 +190,19 @@ server.registerTool('extract_schema', {
 }, async (args) => {
   await ensureBrowser();
   return asText(await dispatch('dom.extract', args));
+});
+
+server.registerTool('extract_marketplace', {
+  title: 'Extract marketplace results',
+  description: 'Extract marketplace/listing cards from the active page with title, price, location, category, delivery, sponsored flag, URL, image, and summary.',
+  inputSchema: {
+    limit: z.number().min(1).max(500).optional(),
+    format: z.enum(['json', 'csv']).optional(),
+    sessionId: z.string().optional(),
+  },
+}, async (args) => {
+  await ensureBrowser();
+  return asText(await dispatch('scrape.results', { ...args, type: 'marketplace' }));
 });
 
 server.registerTool('human_timing_get', {
