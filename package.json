@@ -1,5 +1,5 @@
 {
-  "name": "agentbridge",
+  "name": "@alexandre-leng/agentbridge-ai",
   "version": "3.2.4",
   "description": "Human-paced browser control bridge based on Playwright",
   "type": "module",
@@ -50,6 +50,7 @@
     "node": ">=18"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "registry": "https://npm.pkg.github.com/"
   }
 }
