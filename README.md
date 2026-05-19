@@ -28,7 +28,7 @@ Most AI agents "guess" where to click using screenshots. AgentBridge provides a 
 
 ### 1. Install
 ```bash
-npm install agentbridge
+npm install browser-agentbridge-ai
 npx playwright install chromium
 ```
 
@@ -42,7 +42,7 @@ npm start
 ### 3. Test it
 ```bash
 # CLI
-npx agentbridge-live navigate https://example.com
+npx agentbridge navigate https://example.com
 
 # Or open http://localhost:8080/viewer in your browser
 ```

@@ -1,2 +1,2 @@
 @echo off
-npx tsx "%~dp0src\cli\bridge.ts" %*
+node "%~dp0bridge-cli.cjs" %*

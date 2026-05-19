@@ -2,9 +2,11 @@
 const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
+const readline = require('node:readline');
 const { spawn } = require('child_process');
 
-const WS_URL = 'ws://localhost:8080/ws/browser-bridge';
+const VERSION = '3.2.6';
+const WS_URL = process.env.BRIDGE_URL || 'ws://localhost:8080/ws/browser-bridge';
 let spawnedServer = null;
 
 function send(ws, cmd) {
@@ -55,7 +57,7 @@ async function connectOrStart() {
         return await connect();
       } catch {}
     }
-    throw new Error('Unable to start browser bridge on ws://localhost:8080/ws/browser-bridge');
+    throw new Error('Unable to start browser bridge on ' + WS_URL);
   }
 }
 
@@ -71,6 +73,26 @@ function optionPayload(args) {
   return { payload, positional };
 }
 
+function parseArgs(line) {
+  const args = [];
+  let current = '';
+  let quote = null;
+  for (const ch of line) {
+    if (quote) {
+      if (ch === quote) { quote = null; continue; }
+      current += ch;
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+    } else if (ch === ' ') {
+      if (current) { args.push(current); current = ''; }
+    } else {
+      current += ch;
+    }
+  }
+  if (current) args.push(current);
+  return args;
+}
+
 function print(result) {
   if (result && (result.imageBase64 || result.image)) {
     const out = { ...result };
@@ -80,6 +102,60 @@ function print(result) {
   } else {
     console.log(JSON.stringify(result, null, 2));
   }
+}
+
+function showHelp() {
+  console.log(`
+AgentBridge CLI v${VERSION}
+
+Usage: agentbridge <command> [args]
+
+Commands:
+  navigate <url>          Go to URL
+  annotate                Screenshot + element list
+  click <ref>             Click element by ref number
+  type <ref> <text>       Type text into element
+  press <key>             Press Enter, Tab, Escape
+  scroll [dir] [amount]   Scroll down/up (default: down 300)
+  discover [steps] [px]   Slowly scroll and capture page states
+  screenshot [--full-page] Capture and save a screenshot
+  extract [type]          Extract structured data (article|table|form|listings|marketplace)
+  scrape [opts]           Extract marketplace results (opts: --limit=10 --format=json|csv --out=file)
+  webSearch <query>       Search the web and auto-paginate results
+  siteSearch <query>      Use the current site's visible search form
+  visibleText [opts]      Extract visible DOM text nodes/elements
+  scan [opts]             Read visible text, scroll, and repeat
+  findText <text>         Find visible text, scrolling if needed
+  clickText <text>        Click visible text, scrolling if needed
+  idle [ms]               Move around and pause like a reader
+  jitter [radius] [n]     Small cursor hesitation movements
+  skim [steps] [px]       Scroll/read with pauses
+  backtrack               Small upward scroll and pause
+  focusCycle [n]          Press Tab through focusable controls
+  back / forward          Browser history with human pause
+  timing get              Show consultation timing profile
+  timing set k=v ...      Adjust consultation timings live
+  timing reset            Restore default timing profile
+  antispam                Check current page anti-spam state
+  summary                 Page summary (URL, title, elements)
+  wait [ms]               Wait milliseconds (default: 2000)
+  batch <recipe.json>     Run multiple commands from a JSON recipe file
+  run <cmd1> <args1> <cmd2> <args2> ...  Run multiple commands in sequence
+  repl                    Interactive REPL mode (type "exit" to quit)
+  version                 Print version number
+  help                    Show this help
+
+Environment:
+  BRIDGE_URL              WebSocket URL (default: ws://localhost:8080/ws/browser-bridge)
+
+Examples:
+  agentbridge navigate https://example.com
+  agentbridge annotate
+  agentbridge click 7
+  agentbridge extract marketplace --limit=10
+  agentbridge run "navigate https://google.com" "annotate" "click 3" "summary"
+  agentbridge repl
+`);
 }
 
 const commands = {
@@ -317,6 +393,70 @@ const commands = {
     console.log(JSON.stringify({ waited: ms }));
   },
 
+  async version() {
+    console.log(VERSION);
+  },
+
+  async repl(ws, args) {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout, prompt: 'bridge> ' });
+    console.log('AgentBridge REPL. Type "help" for commands, "exit" to quit.\n');
+    rl.prompt();
+    for await (const line of rl) {
+      if (!line.trim()) { rl.prompt(); continue; }
+      const parsed = parseArgs(line.trim());
+      const cmd = parsed[0];
+      const cargs = parsed.slice(1);
+      if (cmd === 'exit' || cmd === 'quit') break;
+      if (cmd === 'help') { showHelp(); rl.prompt(); continue; }
+      const fn = commands[cmd];
+      if (!fn) {
+        const alias = kebabToCamel(cmd);
+        const afn = commands[alias];
+        if (afn) {
+          try { await afn(ws, cargs); } catch (e) { console.error(e.message); }
+        } else {
+          console.error(`Unknown command: ${cmd}`);
+        }
+        rl.prompt();
+        continue;
+      }
+      try { await fn(ws, cargs); } catch (e) { console.error(e.message); }
+      rl.prompt();
+    }
+    rl.close();
+  },
+
+  async run(ws, args) {
+    const line = args.join(' ');
+    const tokens = parseArgs(line);
+    const steps = [];
+    let i = 0;
+    while (i < tokens.length) {
+      const cmd = tokens[i++];
+      const stepArgs = [];
+      while (i < tokens.length && !commands[tokens[i]] && !kebabToCamel(tokens[i])) {
+        stepArgs.push(tokens[i++]);
+      }
+      steps.push({ cmd, args: stepArgs });
+    }
+    for (const step of steps) {
+      const resolved = kebabToCamel(step.cmd) || step.cmd;
+      const fn = commands[resolved];
+      if (!fn || ['repl', 'version', 'batch', 'start'].includes(resolved)) continue;
+      console.log(`\n>>> ${step.cmd} ${step.args.join(' ')}`);
+      await fn(ws, step.args);
+    }
+  },
+
+  async start() {
+    console.log('Starting AgentBridge server...');
+    const child = spawn(process.execPath, [require.resolve('./bridge-cli.cjs'), 'navigate', 'about:blank'], {
+      env: { ...process.env },
+      stdio: 'inherit',
+    });
+    child.on('error', (e) => console.error('Failed to start server:', e.message));
+  },
+
   async batch(ws, args) {
     const file = args[0];
     if (!file) throw new Error('Usage: batch <recipe.json>');
@@ -330,123 +470,47 @@ const commands = {
   }
 };
 
+function kebabToCamel(cmd) {
+  const map = {
+    'visible-text': 'visibleText',
+    'find-text': 'findText',
+    'click-text': 'clickText',
+    'focus-cycle': 'focusCycle',
+    'web-search': 'webSearch',
+    'site-search': 'siteSearch',
+  };
+  return map[cmd] || null;
+}
+
 async function main() {
-  const [cmd, ...args] = process.argv.slice(2);
-
-  if (!cmd || cmd === 'help') {
-    console.log(`
-Usage: node bridge-cli.cjs <command> [args]
-
-Commands:
-  navigate <url>          Go to URL
-  annotate                Screenshot + element list
-  click <ref>             Click element by ref number
-  type <ref> <text>       Type text into element
-  press <key>             Press Enter, Tab, Escape
-  scroll [dir] [amount]   Scroll down/up (default: down 300)
-  discover [steps] [px]    Slowly scroll and capture page states
-  screenshot [--full-page] Capture and save a screenshot
-  extract [type]          Extract structured data (article|table|form)
-  scrape [opts]           Extract marketplace results (opts: --limit=10 --format=json|csv --out=file)
-  webSearch <query>       Search the web and auto-paginate results
-  siteSearch <query>      Use the current site's visible search form
-  visibleText [opts]      Extract visible DOM text nodes/elements
-  scan [opts]             Read visible text, scroll, and repeat
-  findText <text>         Find visible text, scrolling if needed
-  clickText <text>        Click visible text, scrolling if needed
-  idle [ms]               Move around and pause like a reader
-  jitter [radius] [n]     Small cursor hesitation movements
-  skim [steps] [px]       Scroll/read with pauses and occasional backtrack
-  backtrack               Small upward scroll and pause
-  focusCycle [n]          Press Tab through focusable controls
-  back / forward          Browser history with human pause
-  timing get              Show consultation timing profile
-  timing set k=v ...      Adjust consultation timings live
-  timing reset            Restore default timing profile
-  antispam                Check current page anti-spam state
-  summary                 Page summary (URL, title, elements)
-  wait [ms]               Wait milliseconds (default: 2000)
-  batch <recipe.json>     Run multiple commands from a JSON file
-
-Examples:
-  node bridge-cli.cjs navigate https://example.com
-  node bridge-cli.cjs annotate
-  node bridge-cli.cjs click 7
-  node bridge-cli.cjs extract article
-  node bridge-cli.cjs extract marketplace --limit=10
-  node bridge-cli.cjs scrape --limit=10 --format=csv --out=results.csv
-  node bridge-cli.cjs webSearch "chats asiatique" --limit=20 --engine=google
-  node bridge-cli.cjs siteSearch "contrat fournisseur 2026" --field=Recherche
-  node bridge-cli.cjs visibleText --filter="Numéro|06|Adresse" --limit=50
-  node bridge-cli.cjs scan --steps=4 --filter="Restaurant|Adresse|Numéro"
-  node bridge-cli.cjs clickText "Le Ramus"
-  node bridge-cli.cjs idle 2500
-  node bridge-cli.cjs skim 4 420
-  node bridge-cli.cjs timing set consultSpeed=1.6 minFocusedMs=3500 feedbackIntervalMs=800
-  node bridge-cli.cjs antispam
-
-Batch recipe example (recipe.json):
-  {
-    "steps": [
-      { "cmd": "navigate", "args": ["https://duckduckgo.com/?q=formalibre"] },
-      { "cmd": "wait", "args": ["3000"] },
-      { "cmd": "annotate" },
-      { "cmd": "click", "args": ["25"] },
-      { "cmd": "wait", "args": ["4000"] },
-      { "cmd": "extract", "args": ["article"] }
-    ]
+  if (process.argv.includes('--version') || process.argv.includes('-v')) {
+    console.log(VERSION);
+    process.exit(0);
   }
-`);
+  if (process.argv.includes('--help') || process.argv.includes('-h')) {
+    showHelp();
     process.exit(0);
   }
 
-  const fn = commands[cmd];
-  if (!fn && cmd === 'visible-text') {
-    const ws = await connect();
-    try {
-      await commands.visibleText(ws, args);
-    } finally {
-      ws.close();
-    }
-    return;
-  }
-  if (!fn && cmd === 'find-text') {
-    const ws = await connect();
-    try {
-      await commands.findText(ws, args);
-    } finally {
-      ws.close();
-    }
-    return;
-  }
-  if (!fn && cmd === 'click-text') {
-    const ws = await connect();
-    try {
-      await commands.clickText(ws, args);
-    } finally {
-      ws.close();
-    }
-    return;
-  }
-  if (!fn && cmd === 'focus-cycle') {
-    const ws = await connect();
-    try {
-      await commands.focusCycle(ws, args);
-    } finally {
-      ws.close();
-    }
-    return;
-  }
+  const [cmd, ...args] = process.argv.slice(2);
+  if (!cmd || cmd === 'help') { showHelp(); process.exit(0); }
+
+  const resolved = kebabToCamel(cmd) || cmd;
+  const fn = commands[resolved];
   if (!fn) {
-    console.error(`Unknown command: ${cmd}. Run 'node bridge-cli.cjs help' for usage.`);
+    console.error(`Unknown command: ${cmd}. Run 'agentbridge help' for usage.`);
     process.exit(1);
   }
 
-  const ws = await connectOrStart();
+  if (resolved === 'version') { fn(); process.exit(0); }
+
+  const needsServer = !['start'].includes(resolved);
+  const ws = needsServer ? await connectOrStart() : null;
   try {
+    if (resolved === 'start') { fn(); return; }
     await fn(ws, args);
   } finally {
-    ws.close();
+    if (ws) ws.close();
   }
 }
 
