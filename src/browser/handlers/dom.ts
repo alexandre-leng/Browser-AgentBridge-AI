@@ -168,5 +168,37 @@ export function domHandlers(ctx: HandlerContext): Record<string, Handler> {
       return { filled: fields.length };
     },
 
+    'dom.extractEmails': async () => {
+      const page = await ctx.p();
+      const html = await page.content();
+      const text = await page.evaluate(() => document.body.innerText);
+      const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+      const emails = new Set<string>();
+      for (const match of text.match(emailRegex) ?? []) {
+        emails.add(match.toLowerCase());
+      }
+      for (const match of html.match(emailRegex) ?? []) {
+        emails.add(match.toLowerCase());
+      }
+      for (const match of html.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/gi) ?? []) {
+        emails.add(match.toLowerCase().replace(/^mailto:/i, ''));
+      }
+      return { emails: [...emails].sort() };
+    },
+
+    'dom.extractPhones': async () => {
+      const page = await ctx.p();
+      const text = await page.evaluate(() => document.body.innerText);
+      const phoneRegex = /(?:(?:\+|00)33|0)[1-9](?:[\s.-]?\d{2}){4}/g;
+      const phones = new Set<string>();
+      for (const match of text.match(phoneRegex) ?? []) {
+        phones.add(match.trim());
+      }
+      for (const match of (await page.content()).match(phoneRegex) ?? []) {
+        phones.add(match.trim());
+      }
+      return { phones: [...phones].sort() };
+    },
+
   };
 }

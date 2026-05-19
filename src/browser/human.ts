@@ -2,7 +2,11 @@ import type { Page } from 'playwright';
 
 export const rand = (min: number, max: number) => min + Math.random() * (max - min);
 export const randInt = (min: number, max: number) => Math.floor(rand(min, max + 1));
-export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+export const sleep = (ms: number) => new Promise((r) => setTimeout(r, process.env.BRIDGE_SCRAPE_SPEED === 'fast' ? Math.min(ms, 5) : ms));
+
+export function isScrapeFast(): boolean {
+  return process.env.BRIDGE_SCRAPE_SPEED === 'fast';
+}
 
 export interface HumanTimingProfile {
   consultSpeed: number;
