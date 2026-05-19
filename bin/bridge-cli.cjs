@@ -5,7 +5,7 @@ const path = require('path');
 const readline = require('node:readline');
 const { spawn } = require('child_process');
 
-const VERSION = '3.2.6';
+const VERSION = '3.2.7';
 const WS_URL = process.env.BRIDGE_URL || 'ws://localhost:8080/ws/browser-bridge';
 let spawnedServer = null;
 
