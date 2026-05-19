@@ -49,6 +49,10 @@
   "engines": {
     "node": ">=18"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alexandre-leng/AgentBridge-AI.git"
+  },
   "publishConfig": {
     "access": "public",
     "registry": "https://npm.pkg.github.com/"
