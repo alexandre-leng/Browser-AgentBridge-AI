@@ -40,13 +40,11 @@
   },
   "main": "dist/server.js",
   "files": [
+    "bin/",
     "dist/",
-    "README.md",
-    "LICENSE",
-    "SKILL.md",
     "docs/",
-    "AGENT-GUIDE.md",
-    "DOCUMENTATION.md"
+    "README.md",
+    "LICENSE"
   ],
   "types": "dist/server.d.ts",
   "engines": {
