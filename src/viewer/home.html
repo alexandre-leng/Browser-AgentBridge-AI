@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OpenClaw Browser Bridge Home</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #f4f6f8;
+        color: #172033;
+      }
+      body {
+        margin: 0;
+      }
+      header {
+        background: #153243;
+        color: #fff;
+        padding: 28px clamp(20px, 5vw, 72px);
+      }
+      main {
+        display: grid;
+        gap: 24px;
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 28px clamp(16px, 4vw, 40px) 52px;
+      }
+      section {
+        background: #fff;
+        border: 1px solid #d8e0e8;
+        border-radius: 8px;
+        padding: 20px;
+      }
+      form {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: end;
+      }
+      label {
+        display: grid;
+        gap: 6px;
+        min-width: 240px;
+        font-weight: 650;
+      }
+      input,
+      select,
+      button {
+        font: inherit;
+      }
+      input,
+      select {
+        border: 1px solid #aeb8c4;
+        border-radius: 6px;
+        padding: 10px 12px;
+      }
+      button {
+        border: 0;
+        border-radius: 6px;
+        background: #0f766e;
+        color: #fff;
+        cursor: pointer;
+        padding: 11px 14px;
+        font-weight: 750;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 16px;
+      }
+      article {
+        border: 1px solid #d8e0e8;
+        border-radius: 8px;
+        padding: 16px;
+      }
+      .price {
+        color: #b42318;
+        font-weight: 800;
+      }
+      .muted {
+        color: #526173;
+      }
+      #status {
+        min-height: 24px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>OpenClaw Browser Bridge</h1>
+      <p>Local start page for testing navigation, search, forms, and marketplace extraction.</p>
+    </header>
+    <main>
+      <section aria-labelledby="search-title">
+        <h2 id="search-title">Local Search</h2>
+        <form id="site-search">
+          <label>
+            Search
+            <input name="q" type="search" placeholder="cookeo" autocomplete="off" />
+          </label>
+          <label>
+            Category
+            <select name="category">
+              <option value="">All</option>
+              <option value="electromenager">Home appliances</option>
+              <option value="maison">Home</option>
+            </select>
+          </label>
+          <button type="submit">Search</button>
+        </form>
+        <p id="status" role="status" aria-live="polite"></p>
+      </section>
+
+      <section aria-labelledby="market-title">
+        <h2 id="market-title">Demo Classifieds</h2>
+        <div class="grid">
+          <article>
+            <a href="/demo/ad/electromenager/1">
+              <h3>Cookeo Touch Wifi</h3>
+              <p class="price">Prix: 180 €.</p>
+              <p>Category: Home appliances.</p>
+              <p>Located in Puteaux 92800.</p>
+            </a>
+          </article>
+          <article>
+            <a href="/demo/ad/electromenager/2">
+              <h3>Cookeo mini</h3>
+              <p class="price">50 €</p>
+              <p>Delivery available</p>
+              <p>Rochefort 17300</p>
+            </a>
+          </article>
+          <article>
+            <a href="/demo/ad/electromenager/3">
+              <h3>Vends cookeo + extra crisp</h3>
+              <p class="price">Prix: 145 €.</p>
+              <p>Delivery available</p>
+              <p>Category: Home appliances.</p>
+              <p>Located in Bonvillet 88260.</p>
+            </a>
+          </article>
+        </div>
+      </section>
+    </main>
+    <script>
+      document.querySelector("#site-search").addEventListener("submit", (event) => {
+        event.preventDefault();
+        const data = new FormData(event.currentTarget);
+        const q = String(data.get("q") || "").trim();
+        const category = String(data.get("category") || "All");
+        document.querySelector("#status").textContent = `Search started: ${q || "empty"} (${category || "All"})`;
+      });
+    </script>
+  </body>
+</html>

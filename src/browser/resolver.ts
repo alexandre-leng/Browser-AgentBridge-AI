@@ -12,7 +12,7 @@ export function detectKind(q: any): 'xpath' | 'css' | 'text' {
   if (s.startsWith('//') || s.startsWith('(/') || s.startsWith('/html')) return 'xpath';
   if (/^xpath=/.test(s)) return 'xpath';
   if (/^[#.]/.test(s) && s.length > 1) return 'css';
-  if (/[\[\]>]|::/.test(s) || /^[a-z]+\[/i.test(s)) return 'css';
+  if (/[\[\]>]|::/.test(s) || /^[a-z]+(?:[#.][\w-]+|\[)/i.test(s)) return 'css';
   
   const knownTags = new Set(['html', 'body', 'div', 'span', 'a', 'button', 'input', 'form', 'textarea', 'select', 'img', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'li', 'ul', 'ol', 'section', 'nav', 'article', 'aside', 'header', 'footer']);
   if (knownTags.has(s.toLowerCase())) return 'css';

@@ -427,10 +427,10 @@ export function specialHandlers(ctx: HandlerContext): Record<string, Handler> {
           return { found: false, hits: [], reason: 'timeout', attempt };
         }
         await assertNoAntiBot(page);
-        const hits = await page.evaluate(
-          ({ needle, exact }) => {
-            const out: any[] = [];
-            const q = String(needle).toLowerCase();
+          const hits = await page.evaluate(
+            ({ needle, exact }) => {
+              const out: any[] = [];
+              const q = String(needle).toLowerCase();
             for (const el of Array.from(document.body.querySelectorAll('*')) as Element[]) {
               const h = el as HTMLElement;
               const value = (h.innerText || h.textContent || '').replace(/\s+/g, ' ').trim();
@@ -439,25 +439,32 @@ export function specialHandlers(ctx: HandlerContext): Record<string, Handler> {
               if (exact ? hay !== q : !hay.includes(q)) continue;
               const style = window.getComputedStyle(el);
               if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') continue;
-              const r = el.getBoundingClientRect();
-              if (r.width < 2 || r.height < 2) continue;
+                const r = el.getBoundingClientRect();
+                if (r.width < 2 || r.height < 2) continue;
               const childSame = (Array.from(el.children) as Element[]).some((child) => {
                 const childText = ((child as HTMLElement).innerText || child.textContent || '').replace(/\s+/g, ' ').trim();
                 return childText === value;
               });
               if (childSame) continue;
-              out.push({
-                text: value,
-                tag: el.tagName.toLowerCase(),
-                role: h.getAttribute('role') || '',
-                box: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) },
-              });
-              if (out.length >= 20) break;
-            }
-            return out;
-          },
-          { needle, exact },
-        );
+                const clickable = el.closest('a, button, [role="button"], [role="link"], input[type="button"], input[type="submit"]') as HTMLElement | null;
+                const clickRect = (clickable || el).getBoundingClientRect();
+                const inViewport = clickRect.bottom > 0 && clickRect.right > 0 && clickRect.top < window.innerHeight && clickRect.left < window.innerWidth;
+                const exactScore = hay === q ? 100 : 0;
+                const lengthPenalty = Math.min(Math.max(value.length - q.length, 0), 800) / 20;
+                const actionScore = clickable ? 80 : /^(a|button|input)$/i.test(el.tagName) ? 70 : 0;
+                const viewportScore = inViewport ? 35 : 0;
+                out.push({
+                  text: value,
+                  tag: el.tagName.toLowerCase(),
+                  role: h.getAttribute('role') || '',
+                  box: { x: Math.round(clickRect.x), y: Math.round(clickRect.y), w: Math.round(clickRect.width), h: Math.round(clickRect.height) },
+                  score: exactScore + actionScore + viewportScore - lengthPenalty,
+                });
+              }
+              return out.sort((a, b) => b.score - a.score).slice(0, 20);
+            },
+            { needle, exact },
+          );
         if (hits.length) {
           // hit-review: short glance instead of full humanConsult (which used to
           // spend up to 18-45 s reading). Caller can pass consultMs > 0 to opt

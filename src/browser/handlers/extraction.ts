@@ -11,12 +11,95 @@ function normalizeFilterTerms(textFilter?: string, filterAny?: string[] | string
   return textFilter.split(',').map(s => s.trim()).filter(Boolean);
 }
 
+function clampLimit(limit: unknown, fallback = 20, max = 500) {
+  const n = Number(limit);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(1, Math.min(Math.round(n), max));
+}
+
+function cleanExtractedText(text: unknown) {
+  return String(text ?? '')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/\.[a-z0-9_-]+\s*\{[^}]*\}/gi, ' ')
+    .replace(/@media[^{]+\{[\s\S]*?\}\s*\}/gi, ' ')
+    .replace(/\bcontent:\s*['"][^'"]*['"];?/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function firstMatch(text: string, patterns: RegExp[]) {
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) return match[1].replace(/\s+/g, ' ').trim();
+  }
+  return '';
+}
+
+function toCsv(rows: Record<string, unknown>[]) {
+  const columns = ['title', 'price', 'location', 'category', 'delivery', 'sponsored', 'url', 'image', 'summary'];
+  const esc = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+  return [columns.join(','), ...rows.map((row) => columns.map((col) => esc(row[col])).join(','))].join('\n');
+}
+
+function normalizeMarketplaceItem(raw: any, source = 'dom') {
+  const text = cleanExtractedText(raw.text ?? raw.summary ?? '');
+  const title = cleanExtractedText(raw.title || firstMatch(text, [
+    /^(.+?)\s+\d[\d\s]*€/,
+    /^(.+?)\s+Prix\s*:/i,
+  ]));
+  const price = cleanExtractedText(raw.price || firstMatch(text, [
+    /Prix\s*:\s*([0-9][0-9\s]*(?:[,.]\d{1,2})?\s*€)/i,
+    /\b([0-9][0-9\s]*(?:[,.]\d{1,2})?\s*€)\b/,
+  ]));
+  const location = cleanExtractedText(raw.location || firstMatch(text, [
+    /Située?\s+à\s+([^.]+)\./i,
+    /\b([A-ZÀ-Ÿ][A-Za-zÀ-ÿ'’ -]+(?:\s+\d{5})(?:\s+[A-Za-zÀ-ÿ'’ -]+)?)\b/,
+  ]));
+  const category = cleanExtractedText(raw.category || firstMatch(text, [
+    /Catégorie\s*:\s*([^.]+)\./i,
+  ]));
+  return {
+    title,
+    price,
+    location,
+    category,
+    delivery: Boolean(raw.delivery ?? /Livraison possible|shipping available/i.test(text)),
+    sponsored: Boolean(raw.sponsored ?? /Sponsorisé|Sponsored|À la une/i.test(text)),
+    url: raw.url || raw.website || '',
+    image: raw.image || '',
+    summary: text.slice(0, 500),
+    source,
+  };
+}
+
+function cleanMapsAddress(address: string) {
+  return cleanExtractedText(address)
+    .replace(/\b(?:Ouvert|Fermé|Ouvre bientôt|Open|Closed)\b.*$/i, '')
+    .replace(/[,\s]+$/, '')
+    .trim();
+}
+
+function normalizeSearchUrl(url: string) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname.includes('google.') && parsed.pathname === '/url') {
+      const target = parsed.searchParams.get('q') || parsed.searchParams.get('url');
+      if (target) return target;
+    }
+    return parsed.href;
+  } catch {
+    return url;
+  }
+}
+
 export function extractionHandlers(ctx: HandlerContext): Record<string, Handler> {
   return {
-    'dom.extract': async ({ type, schema, llm = false }: any = {}) => {
+    'dom.extract': async ({ type, schema, llm = false, limit, format }: any = {}) => {
       const page = await ctx.p();
       await assertNoAntiBot(page);
       await assertUsefulPage(page, 'dom.extract');
+      const maxItems = clampLimit(limit, type === 'marketplace' ? 20 : 80);
       if (type === 'custom') {
         if (!schema || !schema.itemSelector || !schema.fields) {
           throw new Error('For custom extraction, schema must contain itemSelector and fields mapping.');
@@ -69,26 +152,55 @@ export function extractionHandlers(ctx: HandlerContext): Record<string, Handler>
         return { type: 'schema', ...extracted };
       }
       if (type === 'search-results') {
-        const results = await page.evaluate(() => {
-          const isAd = (el: Element): boolean => {
-            const p = el.closest('[class*="ad"], [id*="ad"], [class*="sponsored"], [data-text-ad]');
-            return p !== null;
+        const raw = await page.evaluate((limit) => {
+          const clean = (value: unknown) => String(value ?? '').replace(/\s+/g, ' ').trim();
+          const badUrl = (href: string) => {
+            try {
+              const url = new URL(href);
+              return /(^|\.)google\./i.test(url.hostname) && !['/url', '/search'].includes(url.pathname);
+            } catch {
+              return false;
+            }
           };
-          const isTrackingUrl = (url: string): boolean => {
-            return /[?&](ad|ads|sponsored)/i.test(url) || url.includes('/y.js?');
-          };
-          return Array.from(document.querySelectorAll('h3')).map(h => {
-            const link = h.closest('a') || h;
-            const url = h.closest('a')?.href || h.parentElement?.querySelector('a')?.href || '';
-            return {
-              title: h.innerText,
-              url,
-              snippet: h.parentElement?.innerText?.slice(0, 300) || '',
-              _skip: !url || isTrackingUrl(url) || isAd(link)
-            };
-          }).filter(x => x.title && !x._skip).map(({ _skip, ...r }) => r);
-        });
-        return { type, results };
+          const containers = Array.from(document.querySelectorAll('div.tF2Cxc, div.MjjYud, li.b_algo, article, [data-testid="result"], .result')) as HTMLElement[];
+          const source = containers.length ? containers : Array.from(document.querySelectorAll('a:has(h3), h3')) as HTMLElement[];
+          const out: any[] = [];
+          const seen = new Set<string>();
+          for (const node of source) {
+            const headings = (node.matches('h3, h2, [role="heading"]') ? [node] : Array.from(node.querySelectorAll('h3, [role="heading"], h2'))) as HTMLElement[];
+            const h = headings.find((candidate) => {
+              const text = clean(candidate.innerText || candidate.textContent);
+              return text && !/^(résultats web|web results|résultats de recherche|search results)$/i.test(text);
+            }) || null;
+            const link = (h?.closest('a[href]') || node.querySelector?.('a[href]') || node.closest?.('a[href]')) as HTMLAnchorElement | null;
+            const title = clean(h?.innerText || h?.textContent || link?.textContent);
+            const href = link?.href || '';
+            if (!title || !href || badUrl(href)) continue;
+            const text = clean((node as HTMLElement).innerText || node.textContent);
+            const lower = text.toLowerCase();
+            const kind =
+              /sponsorisé|sponsored|annonce/.test(lower) ? 'sponsored' :
+              /vidéo|video|youtube|tiktok|facebook/.test(lower) ? 'video' :
+              /autres questions|people also ask/.test(lower) ? 'question' :
+              'organic';
+            const key = href;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            out.push({ title, url: href, snippet: text.slice(0, 500), kind });
+            if (out.length >= limit) break;
+          }
+          return out;
+        }, maxItems * 2);
+        const seen = new Set<string>();
+        const results = raw
+          .map((r: any) => ({ ...r, url: normalizeSearchUrl(r.url), snippet: cleanExtractedText(r.snippet).slice(0, 300) }))
+          .filter((r: any) => {
+            if (!r.title || !r.url || seen.has(r.url)) return false;
+            seen.add(r.url);
+            return true;
+          })
+          .slice(0, maxItems);
+        return { type, count: results.length, url: page.url(), title: await page.title().catch(() => ''), results };
       } else if (type === 'form') {
         const fields = await page.evaluate(() => {
           return Array.from(document.querySelectorAll('input, select, textarea')).map((el: any) => ({
@@ -130,20 +242,64 @@ export function extractionHandlers(ctx: HandlerContext): Record<string, Handler>
         const message = tables.length === 0 ? 'No tables or grids found on this page.' : undefined;
         return { type, tables, message };
       } else if (type === 'google-maps') {
-        const raw = await page.evaluate(() => {
-          return Array.from(document.querySelectorAll('[data-result-id], .VwiC3b, .tF2Cxc')).map(el => ({
-            title: el.querySelector('h3, .OSrXXb')?.textContent || '',
-            text: el.textContent || '',
-            rating: el.querySelector('.K9E9v, .oqST9c')?.textContent || '',
-          }));
-        });
-        const ADDRESS_RE = /\d+\s+[A-Za-zÀ-ÿ\s'-]+(?:rue|avenue|boulevard|place|chemin|impasse|route|quai|allée)[A-Za-zÀ-ÿ\s'-]+\d{5}/i;
-        const results = raw.map(r => ({
-          title: r.title,
-          phone: extractFrenchPhones(r.text)[0] ?? '',
-          rating: r.rating,
-          address: r.text.match(ADDRESS_RE)?.[0] ?? '',
-        })).filter(r => r.title && (r.phone || r.address));
+        const raw = await page.evaluate((limit) => {
+          const textOf = (el: Element | null) => {
+            if (!el) return '';
+            const clone = el.cloneNode(true) as HTMLElement;
+            clone.querySelectorAll('script, style, noscript, template, svg').forEach((node) => node.remove());
+            return (clone.innerText || clone.textContent || '').replace(/\s+/g, ' ').trim();
+          };
+          const selectors = [
+            '[role="article"]',
+            '[role="feed"] > div',
+            '.Nv2PK',
+            '.THOPZb',
+            '.hfpxzc',
+            '[data-result-id]',
+            '.VkpGBb',
+            '.tF2Cxc',
+          ].join(', ');
+          const nodes = Array.from(document.querySelectorAll(selectors)) as HTMLElement[];
+          const seen = new Set<string>();
+          const out: any[] = [];
+          for (const el of nodes) {
+            const text = textOf(el);
+            if (text.length < 20) continue;
+            const link = (el.querySelector('a[href*="/maps/place/"], a[href*="google.com/maps/place/"]') || el.closest('a[href*="/maps/place/"]')) as HTMLAnchorElement | null;
+            const title =
+              textOf(el.querySelector('[role="heading"], .qBF1Pd, .fontHeadlineSmall, h3')) ||
+              link?.getAttribute('aria-label') ||
+              text.split(/\s+\d[,.]\d|\s+\([0-9\s]+\)/)[0]?.trim() ||
+              '';
+            const key = link?.href || `${title}|${text.slice(0, 80)}`;
+            if (!title || seen.has(key)) continue;
+            seen.add(key);
+            out.push({
+              title,
+              text,
+              url: link?.href || '',
+              rating: text.match(/\b([0-5][,.]\d)\s*\(([\d\s]+)\)/)?.[1] || '',
+              reviews: text.match(/\b[0-5][,.]\d\s*\(([\d\s]+)\)/)?.[1] || '',
+            });
+            if (out.length >= limit) break;
+          }
+          return out;
+        }, maxItems);
+        const ADDRESS_RE = /\b\d{1,5}\s+(?:rue|avenue|av\.?|boulevard|bd\.?|place|chemin|impasse|route|quai|allée|allee|cours|square)\s+[A-Za-zÀ-ÿ0-9\s'’.-]+/i;
+        const results = raw.map(r => {
+          const cleaned = cleanExtractedText(r.text);
+          const hoursMatch = cleaned.match(/\b(?:Ouvert|Fermé|Ouvre bientôt|Open|Closed)\b[^·\n]{0,80}/i);
+          return {
+            title: cleanExtractedText(r.title),
+            phone: extractFrenchPhones(cleaned)[0] ?? '',
+            rating: r.rating ? Number(String(r.rating).replace(',', '.')) : null,
+            reviews: r.reviews ? Number(String(r.reviews).replace(/\s+/g, '')) : null,
+            address: cleanMapsAddress(cleaned.match(ADDRESS_RE)?.[0] ?? ''),
+            website: r.url || '',
+            hours: hoursMatch?.[0] ?? '',
+            summary: cleaned.slice(0, 280),
+          };
+        }).filter(r => r.title && (r.phone || r.address || r.website || r.rating !== null)).slice(0, maxItems);
         return { type, results };
       } else if (type === 'listings') {
         const raw = await page.evaluate(() => {
@@ -161,7 +317,9 @@ export function extractionHandlers(ctx: HandlerContext): Record<string, Handler>
           const candidates = nodes.length ? nodes : Array.from(document.querySelectorAll('a, div')) as HTMLElement[];
           const seen = new Set<string>();
           return candidates.map((el) => {
-            const text = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+            const clone = el.cloneNode(true) as HTMLElement;
+            clone.querySelectorAll('script, style, noscript, template').forEach((node) => node.remove());
+            const text = (clone.innerText || clone.textContent || '').replace(/\s+/g, ' ').trim();
             if (text.length < 12 || text.length > 2500) return null;
             const link = (el.closest('a') as HTMLAnchorElement | null) || el.querySelector('a[href]') as HTMLAnchorElement | null;
             const title =
@@ -173,7 +331,7 @@ export function extractionHandlers(ctx: HandlerContext): Record<string, Handler>
             if (seen.has(key)) return null;
             seen.add(key);
             return { title, text, url: link?.href || '' };
-          }).filter(Boolean).slice(0, 80);
+          }).filter(Boolean).slice(0, 200);
         }) as { title: string; text: string; url: string }[];
         const ADDRESS_RE = /\b\d{1,5}\s+(?:rue|avenue|av\.?|boulevard|bd\.?|place|chemin|impasse|route|quai|allée|allee|cours|square)\s+[A-Za-zÀ-ÿ0-9\s'’.-]+/i;
         const listings = raw.map((r) => {
@@ -188,12 +346,99 @@ export function extractionHandlers(ctx: HandlerContext): Record<string, Handler>
             phone: extractFrenchPhones(r.text)[0] ?? '',
             website: r.url,
             hours: hoursMatch?.[0] ?? '',
-            summary: r.text.slice(0, 280),
+            summary: cleanExtractedText(r.text).slice(0, 280),
           };
-        }).filter((r) => r.name && (r.address || r.phone || r.website || r.rating !== null));
+        }).filter((r) => r.name && (r.address || r.phone || r.website || r.rating !== null)).slice(0, maxItems);
         return { type, listings };
+      } else if (type === 'marketplace') {
+        const raw = await page.evaluate((limit) => {
+          const visible = (el: Element) => {
+            const style = window.getComputedStyle(el);
+            const rect = el.getBoundingClientRect();
+            return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0' && rect.width > 4 && rect.height > 4;
+          };
+          const textOf = (el: Element | null) => {
+            if (!el) return '';
+            const clone = el.cloneNode(true) as HTMLElement;
+            clone.querySelectorAll('script, style, noscript, template, svg').forEach((node) => node.remove());
+            return (clone.innerText || clone.textContent || '').replace(/\s+/g, ' ').trim();
+          };
+          const cardSelectors = [
+            'article',
+            '[role="article"]',
+            '[role="listitem"]',
+            '[data-test-id*="ad"]',
+            '[data-testid*="ad"]',
+            '[data-qa-id*="ad"]',
+            'li:has(a[href*="/ad/"])',
+            'a[href*="/ad/"]',
+            'a[href*="/annonces/"]',
+            'a[href*="/item/"]',
+            'a[href*="/itm/"]',
+            'a[href*="/marketplace/item/"]',
+          ].join(', ');
+          const nodes = Array.from(document.querySelectorAll(cardSelectors)) as HTMLElement[];
+          const linkNodes = Array.from(document.querySelectorAll('a[href]')) as HTMLAnchorElement[];
+          const candidates = nodes.length ? nodes : linkNodes;
+          const seen = new Set<string>();
+          const out: any[] = [];
+          for (const node of candidates) {
+            if (!visible(node)) continue;
+            const link = ((node.matches('a[href]') ? node as HTMLAnchorElement : node.querySelector('a[href]')) || node.closest('a[href]')) as HTMLAnchorElement | null;
+            const href = link?.href || '';
+            const text = textOf(node);
+            if (text.length < 8 || text.length > 3500) continue;
+            if (!/[0-9][0-9\s]*(?:[,.]\d{1,2})?\s*(?:€|\$|£|EUR|USD|GBP)|prix|price|livraison|shipping|située?|located/i.test(text)) continue;
+            const titleNode = node.querySelector('h1,h2,h3,[role="heading"],[data-test-id*="title"],[data-testid*="title"],p[class*="title"],span[class*="title"]') as HTMLElement | null;
+            const priceNode = node.querySelector('[aria-label*="Prix"],[aria-label*="Price"],[data-test-id*="price"],[data-testid*="price"],[class*="price"],[class*="Price"]') as HTMLElement | null;
+            const img = node.querySelector('img') as HTMLImageElement | null;
+            const title = textOf(titleNode) || link?.getAttribute('aria-label') || text.split(/\s+\d[\d\s]*(?:[,.]\d{1,2})?\s*(?:€|\$|£|EUR|USD|GBP)\b/i)[0]?.trim() || '';
+            const price = textOf(priceNode);
+            const key = href || `${title}|${text.slice(0, 100)}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            out.push({
+              title,
+              price,
+              text,
+              url: href,
+              image: img?.currentSrc || img?.src || '',
+              sponsored: /Sponsorisé|Sponsored|À la une/i.test(text),
+              delivery: /Livraison possible|shipping available/i.test(text),
+            });
+            if (out.length >= Math.min(limit * 4, 200)) break;
+          }
+          return out;
+        }, maxItems);
+        const items: any[] = [];
+        const seen = new Set<string>();
+        for (const rawItem of raw) {
+          const item = normalizeMarketplaceItem(rawItem, 'marketplace');
+          if (!item.title || (!item.price && !item.url)) continue;
+          const key = item.url || `${item.title}|${item.price}|${item.location}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          items.push(item);
+          if (items.length >= maxItems) break;
+        }
+        const result = {
+          type,
+          count: items.length,
+          url: page.url(),
+          title: await page.title().catch(() => ''),
+          items,
+        };
+        return format === 'csv' ? { ...result, csv: toCsv(items) } : result;
       }
       return { text: await page.evaluate(() => document.body.innerText) };
+    },
+
+    'scrape.results': async ({ type = 'marketplace', limit = 20, format = 'json' }: any = {}) => {
+      if (!ctx.dispatch) throw new Error('scrape.results requires dispatcher');
+      const result = await ctx.dispatch('dom.extract', { type, limit, format });
+      if (format === 'csv' && result.csv) return result;
+      if (format === 'json') return result;
+      throw new Error('scrape.results: format must be json or csv');
     },
 
     'dom.visibleText': async ({ query, textFilter, filterAny, filterLines = false, limit = 300, includeHidden = false }: any = {}) => {

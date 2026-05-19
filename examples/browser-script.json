@@ -1,0 +1,7 @@
+{
+  "steps": [
+    { "type": "navigate", "url": "https://example.com" },
+    { "type": "annotate" },
+    { "type": "summary" }
+  ]
+}
