@@ -4,9 +4,8 @@
   "description": "Human-paced browser control bridge based on Playwright",
   "type": "module",
   "bin": {
-    "agentbridge": "./dist/cli/bridge.js",
-    "agentbridge-live": "./dist/cli/live.js",
-    "agentbridge-mcp": "./dist/mcp.js"
+    "agentbridge": "./bin/bridge-cli.cjs",
+    "bridge-check": "./bin/bridge-check.cjs"
   },
   "scripts": {
     "start": "tsx src/server.ts",
