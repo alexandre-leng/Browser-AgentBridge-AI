@@ -1,6 +1,6 @@
 {
   "name": "browser-agentbridge-ai",
-  "version": "3.2.6",
+  "version": "3.2.7",
   "description": "Human-paced browser control bridge based on Playwright",
   "type": "module",
   "bin": {
