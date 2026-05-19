@@ -8,7 +8,7 @@ https://github.com/alexandre-leng/AgentBridge-AI
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Playwright](https://img.shields.io/badge/Powered%20by-Playwright-00ad5a.svg)](https://playwright.dev/)
 [![CI](https://github.com/alexandre-leng/agentbridge/actions/workflows/ci.yml/badge.svg)](https://github.com/alexandre-leng/agentbridge/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/agentbridge)](https://www.npmjs.com/package/agentbridge)
+[![npm](https://img.shields.io/npm/v/browser-agentbridge-ai)](https://www.npmjs.com/package/browser-agentbridge-ai)
 
 ---
 
