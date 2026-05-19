@@ -36,13 +36,13 @@ lines.push('- `BRIDGE_ALLOW_FILE_URLS=1` + `BRIDGE_ALLOWED_FILE_ROOTS` : requis 
 lines.push('');
 lines.push('## MCP');
 lines.push('');
-lines.push('Serveur MCP officiel via stdio : `npm run mcp` ou `openclaw-mcp` après build.');
+lines.push('Serveur MCP officiel via stdio : `npm run mcp` ou `agentbridge-mcp` après build.');
 lines.push('');
 lines.push('Outils MCP principaux : `browser_status`, `navigate`, `annotate_page`, `click_ref`, `type_ref`, `extract_schema`, `human_timing_get`, `human_timing_set`, `human_antispam_check`. Outil bas niveau `browser_command` activable via `BRIDGE_MCP_ALLOW_RAW=1`.');
 lines.push('');
 lines.push('Les outils `human_timing_get`, `human_timing_set` et `human_antispam_check` sont prévus pour les agents : ils permettent d\'adapter la cadence en cours de session sans exposer toute l\'API brute.');
 lines.push('');
-lines.push('Ressource MCP : `api` (`openclaw://api`) expose la liste des commandes bridge enregistrées. Prompt MCP : `browser_task` fournit un canevas de tâche navigateur orienté refs.');
+lines.push('Ressource MCP : `api` (`agentbridge://api`) expose la liste des commandes bridge enregistrées. Prompt MCP : `browser_task` fournit un canevas de tâche navigateur orienté refs.');
 lines.push('');
 lines.push('## Commandes par catégorie');
 lines.push('');

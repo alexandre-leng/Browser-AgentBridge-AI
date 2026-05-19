@@ -1,13 +1,12 @@
 {
-  "name": "openclaw-browser-bridge",
+  "name": "agentbridge",
   "version": "3.2.4",
   "description": "Human-paced browser control bridge based on Playwright",
   "type": "module",
   "bin": {
-    "openclaw-browser-bridge": "./dist/cli/bridge.js",
-    "openclaw-bridge": "./dist/cli/bridge.js",
-    "openclaw-live": "./dist/cli/live.js",
-    "openclaw-mcp": "./dist/mcp.js"
+    "agentbridge": "./dist/cli/bridge.js",
+    "agentbridge-live": "./dist/cli/live.js",
+    "agentbridge-mcp": "./dist/mcp.js"
   },
   "scripts": {
     "start": "tsx src/server.ts",

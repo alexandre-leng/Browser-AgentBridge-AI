@@ -1,8 +1,8 @@
-# 🦾 AI Agent Guide for OpenClaw Bridge
+# 🦾 AI Agent Guide for AgentBridge
 
 > **Read this if you are an AI model (Claude, GPT, etc.) tasked with browsing the web.**
 
-OpenClaw is designed to be your "Eyes and Hands" on the web. Unlike other tools that send you raw HTML (too many tokens) or raw screenshots (too hard to calculate coordinates), OpenClaw gives you **Numerical Grounding**.
+AgentBridge is designed to be your "Eyes and Hands" on the web. Unlike other tools that send you raw HTML (too many tokens) or raw screenshots (too hard to calculate coordinates), AgentBridge gives you **Numerical Grounding**.
 
 ---
 

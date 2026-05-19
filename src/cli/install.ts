@@ -18,7 +18,7 @@ export type InstallResult = {
   dryRun: boolean;
 };
 
-const SKILL_NAME = 'openclaw-browser-bridge';
+const SKILL_NAME = 'agentbridge';
 
 function parseOptionValue(args: string[], name: string) {
   const inline = args.find(arg => arg.startsWith(`${name}=`));
@@ -69,27 +69,27 @@ function skillContent(target: InstallTarget) {
     tags: [browser, automation, cli, openclaw]
     category: browser-automation
     requires_toolsets: [terminal]`
-    : `metadata: {"openclaw":{"tags":["browser","automation","cli"],"requires":{"bins":["node"]},"homepage":"https://github.com/alexandre-leng/openclaw-browser-bridge"}}`;
+    : `metadata: {"openclaw":{"tags":["browser","automation","cli"],"requires":{"bins":["node"]},"homepage":"https://github.com/alexandre-leng/agentbridge"}}`;
 
   return `---
 name: ${SKILL_NAME}
-description: Control a local browser through OpenClaw Browser Bridge using CLI scripts, numerical page refs, and DOM-first extraction.
+    description: Control a local browser through AgentBridge using CLI scripts, numerical page refs, and DOM-first extraction.
 version: 1.0.0
 platforms: [linux, macos, windows]
 ${metadata}
 ---
 
-# OpenClaw Browser Bridge
+# AgentBridge
 
 Use this skill when the task needs reliable browser control from an agent shell: navigate, inspect a page, click numbered refs, type into fields, extract structured data, or run a repeatable browser script.
 
 ## Requirements
 
-- The bridge package must be installed or available through \`npx openclaw-browser-bridge\`.
+- The bridge package must be installed or available through \`npx agentbridge\`.
 - Start the bridge before issuing browser commands:
 
 \`\`\`bash
-npx openclaw-browser-bridge start
+npx agentbridge start
 \`\`\`
 
 - The default endpoint is \`ws://localhost:8080/ws/browser-bridge\`. Override it with \`BRIDGE_URL\` when needed.
@@ -99,13 +99,13 @@ npx openclaw-browser-bridge start
 Prefer compact batched commands:
 
 \`\`\`bash
-npx openclaw-browser-bridge run "navigate https://example.com" "annotate" "click 3" "summary"
+npx agentbridge run "navigate https://example.com" "annotate" "click 3" "summary"
 \`\`\`
 
 Use a script file for reusable workflows:
 
 \`\`\`bash
-npx openclaw-browser-bridge script ./openclaw-script.json
+npx agentbridge script ./agentbridge-script.json
 \`\`\`
 
 Valid script shape:
@@ -150,19 +150,19 @@ Do not use this skill to bypass login, CAPTCHA, rate limits, anti-abuse systems,
 }
 
 function promptsContent() {
-  return `# OpenClaw Browser Bridge Prompts
+  return `# AgentBridge Prompts
 
 ## Browser task
 
-Use OpenClaw Browser Bridge to complete this browser task. Start by annotating the page, use numbered refs for interactions, batch related actions, and verify the final state.
+Use AgentBridge to complete this browser task. Start by annotating the page, use numbered refs for interactions, batch related actions, and verify the final state.
 
 ## Data extraction
 
-Use OpenClaw Browser Bridge to navigate to the target page and extract structured data. Prefer \`extract table\`, \`extract article\`, \`extract form\`, or \`visible-text\` over raw HTML parsing.
+Use AgentBridge to navigate to the target page and extract structured data. Prefer \`extract table\`, \`extract article\`, \`extract form\`, or \`visible-text\` over raw HTML parsing.
 
 ## Script authoring
 
-Create an OpenClaw script JSON file with a \`steps\` array. Each step should use simple CLI command types such as \`navigate\`, \`annotate\`, \`click\`, \`type\`, \`press\`, \`wait\`, \`extract\`, or \`summary\`.
+Create an AgentBridge script JSON file with a \`steps\` array. Each step should use simple CLI command types such as \`navigate\`, \`annotate\`, \`click\`, \`type\`, \`press\`, \`wait\`, \`extract\`, or \`summary\`.
 `;
 }
 

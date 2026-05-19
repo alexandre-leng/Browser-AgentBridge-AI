@@ -1,18 +1,18 @@
-# OpenClaw Browser Bridge v3.2
+# AgentBridge v3.2
 
 > **The high-fidelity browser control layer for AI Agents.**
 > Precise, Human-like, and Production-ready.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Playwright](https://img.shields.io/badge/Powered%20by-Playwright-00ad5a.svg)](https://playwright.dev/)
-[![CI](https://github.com/alexandre-leng/openclaw-browser-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/alexandre-leng/openclaw-browser-bridge/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/openclaw-browser-bridge)](https://www.npmjs.com/package/openclaw-browser-bridge)
+[![CI](https://github.com/alexandre-leng/agentbridge/actions/workflows/ci.yml/badge.svg)](https://github.com/alexandre-leng/agentbridge/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/agentbridge)](https://www.npmjs.com/package/agentbridge)
 
 ---
 
-## 🌟 Why OpenClaw Browser Bridge?
+## 🌟 Why AgentBridge?
 
-Most AI agents "guess" where to click using screenshots. OpenClaw Browser Bridge provides a **DOM-first** approach:
+Most AI agents "guess" where to click using screenshots. AgentBridge provides a **DOM-first** approach:
 - **99% Precision**: No more x,y coordinate guessing. Interact with elements using stable numerical IDs.
 - **10x Token Efficiency**: Send a 200-token element list instead of a 2000-token high-res screenshot.
 - **Anti-Detection**: Built-in human-like mouse movements (Bezier curves), varied typing speeds, and stealth scripts.
@@ -26,7 +26,7 @@ Most AI agents "guess" where to click using screenshots. OpenClaw Browser Bridge
 
 ### 1. Install
 ```bash
-npm install openclaw-browser-bridge
+npm install agentbridge
 npx playwright install chromium
 ```
 
@@ -40,7 +40,7 @@ npm start
 ### 3. Test it
 ```bash
 # CLI
-node node_modules/.bin/openclaw-live navigate https://example.com
+npx agentbridge-live navigate https://example.com
 
 # Or open http://localhost:8080/viewer in your browser
 ```
@@ -56,23 +56,23 @@ docker run -p 8080:8080 browser-bridge
 npm run mcp
 ```
 
-After `npm run build`, the package exposes `openclaw-mcp`. The MCP server registers focused tools (`browser_status`, `navigate`, `annotate_page`, `click_ref`, `type_ref`, `extract_schema`, `human_timing_get`, `human_timing_set`, `human_antispam_check`). A low-level `browser_command` escape hatch is available behind `BRIDGE_MCP_ALLOW_RAW=1`.
+After `npm run build`, the package exposes `agentbridge-mcp`. The MCP server registers focused tools (`browser_status`, `navigate`, `annotate_page`, `click_ref`, `type_ref`, `extract_schema`, `human_timing_get`, `human_timing_set`, `human_antispam_check`). A low-level `browser_command` escape hatch is available behind `BRIDGE_MCP_ALLOW_RAW=1`.
 
-The MCP resource `api` (`openclaw://api`) exposes the registered bridge command list, and the `browser_task` prompt gives agents a refs-first task template.
+The MCP resource `api` (`agentbridge://api`) exposes the registered bridge command list, and the `browser_task` prompt gives agents a refs-first task template.
 
 ### Agent Skill Install
 
-Install OpenClaw Browser Bridge as an AgentSkills-compatible skill for local agents:
+Install AgentBridge as an AgentSkills-compatible skill for local agents:
 
 ```bash
 npm run build
-npx openclaw-browser-bridge install openclaw --global
-npx openclaw-browser-bridge install hermes
+npx agentbridge install openclaw --global
+npx agentbridge install hermes
 ```
 
 Targets:
-- `openclaw`: writes `openclaw-browser-bridge/SKILL.md` and `PROMPTS.md` into `./skills` by default, or `~/.openclaw/skills` with `--global`.
-- `hermes`: writes the skill into `~/.hermes/skills/openclaw-browser-bridge`.
+- `openclaw`: writes `agentbridge/SKILL.md` and `PROMPTS.md` into `./skills` by default, or `~/.openclaw/skills` with `--global`.
+- `hermes`: writes the skill into `~/.hermes/skills/agentbridge`.
 - `all`: installs both adapters.
 
 Use `--workspace <path>` to stage into a workspace instead of a user-level directory, and `--dry-run` to preview paths.
@@ -80,7 +80,7 @@ Use `--workspace <path>` to stage into a workspace instead of a user-level direc
 Reusable browser scripts can be run from JSON:
 
 ```bash
-npx openclaw-browser-bridge script ./examples/browser-script.json
+npx agentbridge script ./examples/browser-script.json
 ```
 
 ```json
@@ -98,7 +98,7 @@ npx openclaw-browser-bridge script ./examples/browser-script.json
 
 ## 🛠️ The `bridge` CLI
 
-OpenClaw Browser Bridge includes a powerful CLI to interact with the browser from any terminal or script.
+AgentBridge includes a powerful CLI to interact with the browser from any terminal or script.
 
 ### One-liner Workflows (Batch Mode)
 Execute complex sequences in a single request to eliminate network latency:
@@ -135,7 +135,7 @@ Designed specifically for LLMs (Claude, GPT, Gemini).
 
 ### Runtime Human Timing
 
-OpenClaw Browser Bridge separates interaction speed from consultation speed. Mouse movement and typing stay humanized, while page-reading pauses can be adjusted live by the agent when a site starts reacting badly to rapid browsing.
+AgentBridge separates interaction speed from consultation speed. Mouse movement and typing stay humanized, while page-reading pauses can be adjusted live by the agent when a site starts reacting badly to rapid browsing.
 
 ```bash
 node bridge-cli.cjs timing get
@@ -151,7 +151,7 @@ Typical agent loop:
 4. If the page feels sensitive, call `human.timing.set` with a higher `consultSpeed` or larger minimum pauses.
 5. Call `human.antispam.check` before continuing with more clicks or searches.
 
-`consultSpeed` is a multiplier: `1` is default, `1.5` is slower, `0.75` is faster. Prefer slowing down and handing off to a human if `human_antispam_check` reports a block; OpenClaw Browser Bridge is designed for polite automation, not bypassing protections.
+`consultSpeed` is a multiplier: `1` is default, `1.5` is slower, `0.75` is faster. Prefer slowing down and handing off to a human if `human_antispam_check` reports a block; AgentBridge is designed for polite automation, not bypassing protections.
 
 Schema extraction example:
 ```json
@@ -202,7 +202,7 @@ npm test
 
 ## 👁️ Human Realism (`src/browser/human.ts`)
 
-OpenClaw Browser Bridge's anti-detection isn't just stealth scripts — every interaction is shaped to match human motor patterns.
+AgentBridge's anti-detection isn't just stealth scripts — every interaction is shaped to match human motor patterns.
 
 | Aspect | Implementation |
 |---|---|
@@ -400,7 +400,7 @@ Returns `{ results: [{step, ok, type, result|error}, ...], durationMs, stepsExec
 
 Hardening: path-traversal guard on `/viewer/` & `/captures/`, WS `verifyClient` (Origin + token), token required outside localhost, URL allowlist (`http:`, `https:`, `about:` by default), explicit `file:` roots, explicit `exec.script` enablement, cookie structure validation, security headers (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, viewer CSP), scrubbed error messages.
 
-Polite browsing: OpenClaw Browser Bridge slows repeated navigation to the same domain and stops automation if it detects an anti-bot verification page. This is a safety handoff, not a bypass.
+Polite browsing: AgentBridge slows repeated navigation to the same domain and stops automation if it detects an anti-bot verification page. This is a safety handoff, not a bypass.
 
 ## Use Cases
 

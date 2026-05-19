@@ -32,8 +32,8 @@ const DEFAULT_TIMING_PROFILE: HumanTimingProfile = {
 
 let timingProfile: HumanTimingProfile = { ...DEFAULT_TIMING_PROFILE };
 
-const CURSOR_ID = '__openclaw_demo_cursor__';
-const CURSOR_STYLE_ID = '__openclaw_demo_cursor_style__';
+const CURSOR_ID = '__agentbridge_cursor__';
+const CURSOR_STYLE_ID = '__agentbridge_cursor_style__';
 
 function demoSlowdown() {
   return Math.max(0.25, Number(process.env.BRIDGE_DEMO_SPEED ?? 1));

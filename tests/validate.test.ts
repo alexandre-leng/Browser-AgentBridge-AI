@@ -37,7 +37,7 @@ describe('validateUrl', () => {
     expect(() => validateUrl('data:text/html,<script>')).toThrow();
   });
   it('rejects file: by default', () => {
-    expect(() => validateUrl('file:///tmp/openclaw.html')).toThrow(/file/);
+    expect(() => validateUrl('file:///tmp/agentbridge.html')).toThrow(/file/);
   });
   it('rejects garbage', () => {
     expect(() => validateUrl('not a url')).toThrow();

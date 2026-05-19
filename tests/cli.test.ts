@@ -83,7 +83,7 @@ describe('mapCommand', () => {
   });
 
   it('loads json script files into bridge commands', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'openclaw-script-'));
+    const dir = mkdtempSync(join(tmpdir(), 'agentbridge-script-'));
     const file = join(dir, 'script.json');
     writeFileSync(file, JSON.stringify({
       steps: [
@@ -111,12 +111,12 @@ describe('install adapters', () => {
   });
 
   it('plans openclaw and hermes skill files', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'openclaw-install-'));
+    const dir = mkdtempSync(join(tmpdir(), 'agentbridge-install-'));
     try {
       const openclaw = installForTarget('openclaw', { workspace: dir, dryRun: true });
       const hermes = installForTarget('hermes', { workspace: dir, dryRun: true });
-      expect(openclaw.skillDir).toContain(join('skills', 'openclaw-browser-bridge'));
-      expect(hermes.skillDir).toContain(join('.hermes', 'skills', 'openclaw-browser-bridge'));
+      expect(openclaw.skillDir).toContain(join('skills', 'agentbridge'));
+      expect(hermes.skillDir).toContain(join('.hermes', 'skills', 'agentbridge'));
       expect(openclaw.files.map(file => file.endsWith('SKILL.md'))).toContain(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });

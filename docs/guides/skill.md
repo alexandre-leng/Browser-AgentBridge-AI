@@ -1,13 +1,13 @@
 ---
 name: browser-bridge
 description: |
-  Browser automation via OpenClaw Browser Bridge.
+  Browser automation via AgentBridge.
   Default: MCP server (9 tools, simple). Advanced: JSON-RPC (80 commands, precise).
   Navigate, annotate, click, type, extract, human-like behavior.
 version: 3.2.4
 ---
 
-# 🦾 Skill: OpenClaw Browser Bridge
+# 🦾 Skill: AgentBridge
 
 > **You are an AI agent with a browser.** You control it via `id`-based interaction (numerical refs). No coordinate guessing. No HTML parsing. Just stable element IDs.
 
@@ -69,7 +69,7 @@ Sections below are **reference material** — don't read them all. Jump to what 
 
 **Always start with MCP.** It exposes focused tools: `navigate`, `annotate_page`, `click_ref`, `type_ref`, `extract_schema`, `human_timing_get/set`, `human_antispam_check`.
 
-- Connect via `openclaw-mcp` after `npm run build`
+- Connect via `agentbridge-mcp` after `npm run build`
 - Works with Claude Desktop, Codex, and any MCP client
 - Simpler, smaller, enough for 80% of tasks
 
@@ -104,10 +104,10 @@ Use the `exec` tool for simple, single actions (quick test, navigate once). Not 
 cd C:\Users\<USER>\.openclaw\workspace
 
 # 2. Clone the project
-git clone https://github.com/alexandre-leng/openclaw-browser-bridge.git
+git clone https://github.com/alexandre-leng/agentbridge.git
 
 # 3. Install dependencies
-cd openclaw-browser-bridge
+cd agentbridge
 npm install
 
 # 4. Install the Chromium browser for Playwright
@@ -118,7 +118,7 @@ npx playwright install chromium
 
 ### 1.3 Start The Server
 ```bash
-cd openclaw-browser-bridge
+cd agentbridge
 npm start
 ```
 
@@ -126,7 +126,7 @@ Check that it is running: `http://localhost:8080/health` -> `{ "status": "ok" }`
 
 ### 1.4 Verify The CLI
 ```bash
-cd openclaw-browser-bridge
+cd agentbridge
 .\bridge.cmd navigate https://example.com
 ```
 
@@ -147,7 +147,7 @@ ls .openclaw\workspace\skills\browser-bridge\SKILL.md
 If you just cloned the project, copy it:
 ```bash
 mkdir -p .openclaw\workspace\skills\browser-bridge
-copy openclaw-browser-bridge\SKILL.md .openclaw\workspace\skills\browser-bridge\SKILL.md
+copy agentbridge\SKILL.md .openclaw\workspace\skills\browser-bridge\SKILL.md
 ```
 
 ### 2.2 Enable It In openclaw.json
@@ -190,7 +190,7 @@ openclaw clawhub install browser-bridge
 - If `BRIDGE_TOKEN` is set, send header `Authorization: Bearer <token>` on WS connect, or `?token=<token>` in the WS URL.
 - For CLI: token is not needed (local only).
 
-**MCP Server** (experimental): `npm run mcp` in bridge folder, or `openclaw-mcp` after build. Tools: `browser_status`, `navigate`, `annotate_page`, `click_ref`, `type_ref`, `extract_schema`, `human_timing_get`, `human_timing_set`, `human_antispam_check`. Raw `browser_command` requires `BRIDGE_MCP_ALLOW_RAW=1`.
+**MCP Server** (experimental): `npm run mcp` in bridge folder, or `agentbridge-mcp` after build. Tools: `browser_status`, `navigate`, `annotate_page`, `click_ref`, `type_ref`, `extract_schema`, `human_timing_get`, `human_timing_set`, `human_antispam_check`. Raw `browser_command` requires `BRIDGE_MCP_ALLOW_RAW=1`.
 
 ---
 
@@ -198,7 +198,7 @@ openclaw clawhub install browser-bridge
 
 ### Bridge server must be running
 ```bash
-cd openclaw-browser-bridge && npm start
+cd agentbridge && npm start
 ```
 Verify: `http://localhost:8080/health`
 
@@ -295,7 +295,7 @@ Use the `exec` tool for quick, simple browser tasks.
 ```javascript
 exec: {
   command: "bridge.cmd <command> [args]",
-  workdir: "<path-to-openclaw-browser-bridge>"
+  workdir: "<path-to-agentbridge>"
 }
 ```
 
@@ -702,7 +702,7 @@ bridge.cmd run "wait 4000" "extract article"
 ### J. From Zero: First-Time Setup → First Action
 ```bash
 # If the bridge is not running, start it first in a separate terminal:
-cd openclaw-browser-bridge && npm start
+cd agentbridge && npm start
 
 # Then:
 bridge.cmd run "navigate https://example.com" "wait 1000" "annotate --no-image"
@@ -715,7 +715,7 @@ bridge.cmd run "navigate https://example.com" "wait 1000" "annotate --no-image"
 
 | Error | Cause | Recovery |
 |-------|-------|----------|
-| `Connection refused` | Bridge server not running | Start server: `cd openclaw-browser-bridge && npm start` |
+| `Connection refused` | Bridge server not running | Start server: `cd agentbridge && npm start` |
 | `Element not found` | Page changed, ref is stale | Re-annotate, get new `ref`. Bridge returns suggestions if available. |
 | `Element not found + suggestions` | Bridge suggests similar refs | Use the suggested `ref` if semantically correct |
 | `Timeout` | Element didn't appear | Increase wait, retry with `agent.waitFor`/`wait --for text` |

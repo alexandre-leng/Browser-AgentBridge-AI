@@ -145,7 +145,7 @@ export function extractionHandlers(ctx: HandlerContext): Record<string, Handler>
           return {
             type: 'schema-llm-prompt',
             prompt: buildJsonSchemaPrompt(schema, await page.evaluate(() => document.body.innerText)),
-            note: 'Send this prompt to an LLM client and parse the JSON response. OpenClaw does not call external LLMs from the bridge process.',
+            note: 'Send this prompt to an LLM client and parse the JSON response. AgentBridge does not call external LLMs from the bridge process.',
           };
         }
         const extracted = await extractWithSchema(page, schema) as { data: unknown; missing: string[] };

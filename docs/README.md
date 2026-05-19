@@ -1,6 +1,6 @@
 # Documentation
 
-Bienvenue dans la documentation d'OpenClaw Browser Bridge.
+Bienvenue dans la documentation d'AgentBridge.
 
 ## Structure
 

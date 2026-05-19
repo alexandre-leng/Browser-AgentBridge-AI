@@ -1,9 +1,9 @@
-# OpenClaw Browser Bridge — Full Technical Reference
+# AgentBridge — Full Technical Reference
 
 > **Version**: 3.2.4
 > **Last Updated**: May 18, 2026
 
-The OpenClaw Browser Bridge is a high-performance automation layer that bridges the gap between AI Agents and the Web. It focuses on **precision**, **human-like interaction**, and **structured data extraction**.
+AgentBridge is a high-performance automation layer that bridges the gap between AI Agents and the Web. It focuses on **precision**, **human-like interaction**, and **structured data extraction**.
 
 ---
 
@@ -179,7 +179,7 @@ The stdio MCP server exposes focused tools for common agent workflows:
 
 `browser_status`, `navigate`, `annotate_page`, `click_ref`, `type_ref`, `extract_schema`, `human_timing_get`, `human_timing_set`, `human_antispam_check`.
 
-When `BRIDGE_MCP_ALLOW_RAW=1`, the server also exposes `browser_command` for low-level command dispatch. The MCP resource `api` (`openclaw://api`) returns the registered bridge command list, and the `browser_task` prompt provides a refs-first browser-task template.
+When `BRIDGE_MCP_ALLOW_RAW=1`, the server also exposes `browser_command` for low-level command dispatch. The MCP resource `api` (`agentbridge://api`) returns the registered bridge command list, and the `browser_task` prompt provides a refs-first browser-task template.
 
 ---
 

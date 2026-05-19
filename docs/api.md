@@ -21,13 +21,13 @@ Request format:
 
 ## MCP
 
-Official MCP server over stdio: `npm run mcp`, or `openclaw-mcp` after build.
+Official MCP server over stdio: `npm run mcp`, or `agentbridge-mcp` after build.
 
 Main MCP tools: `browser_status`, `navigate`, `annotate_page`, `click_ref`, `type_ref`, `extract_schema`, `web_search`, `inspect_forms`, `fill_form`, `submit_form`, `site_search`, `extract_marketplace`, `human_timing_get`, `human_timing_set`, and `human_antispam_check`.
 
 The low-level `browser_command` tool is disabled by default and can be enabled with `BRIDGE_MCP_ALLOW_RAW=1`.
 
-MCP resource: `api` (`openclaw://api`) exposes the registered bridge command list. MCP prompt: `browser_task` provides a ref-oriented browser task template.
+MCP resource: `api` (`agentbridge://api`) exposes the registered bridge command list. MCP prompt: `browser_task` provides a ref-oriented browser task template.
 
 ## Commands By Category
 
@@ -401,7 +401,7 @@ CLI:
 ```bash
 node bridge-cli.cjs extract marketplace --limit=10
 node bridge-cli.cjs scrape --limit=10 --format=csv --out=results.csv
-openclaw-bridge extract marketplace --limit=10 --format=json
+agentbridge extract marketplace --limit=10 --format=json
 ```
 
 Associated MCP tool: `extract_marketplace`.

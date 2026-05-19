@@ -24,13 +24,13 @@ function asText(data: unknown) {
 }
 
 const server = new McpServer({
-  name: 'openclaw-browser-bridge',
+  name: 'agentbridge',
   version: VERSION,
 });
 
 server.registerTool('browser_status', {
   title: 'Browser status',
-  description: 'Return the active OpenClaw browser session status.',
+  description: 'Return the active AgentBridge browser session status.',
 }, async () => {
   await ensureBrowser();
   return asText(await dispatch('browser.status', {}));
@@ -39,7 +39,7 @@ server.registerTool('browser_status', {
 if (process.env.BRIDGE_MCP_ALLOW_RAW === '1') {
   server.registerTool('browser_command', {
     title: 'Run browser bridge command (raw)',
-    description: 'Run any OpenClaw command by type and payload. Disabled by default; set BRIDGE_MCP_ALLOW_RAW=1 to enable.',
+    description: 'Run any AgentBridge command by type and payload. Disabled by default; set BRIDGE_MCP_ALLOW_RAW=1 to enable.',
     inputSchema: {
       type: z.string().min(1),
       payload: z.record(z.string(), z.unknown()).optional(),
@@ -241,9 +241,9 @@ server.registerTool('human_antispam_check', {
   return asText(await dispatch('human.antispam.check', {}));
 });
 
-server.registerResource('api', 'openclaw://api', {
-  title: 'OpenClaw API',
-  description: 'Registered OpenClaw command names.',
+server.registerResource('api', 'agentbridge://api', {
+  title: 'AgentBridge API',
+  description: 'Registered AgentBridge command names.',
   mimeType: 'application/json',
 }, async (uri) => ({
   contents: [{ uri: uri.href, mimeType: 'application/json', text: JSON.stringify(Object.keys(handlers).sort(), null, 2) }],
@@ -251,14 +251,14 @@ server.registerResource('api', 'openclaw://api', {
 
 server.registerPrompt('browser_task', {
   title: 'Browser task',
-  description: 'Template for asking an agent to solve a browser task via OpenClaw refs.',
+  description: 'Template for asking an agent to solve a browser task via AgentBridge refs.',
   argsSchema: { goal: z.string() },
 }, ({ goal }) => ({
   messages: [{
     role: 'user',
     content: {
       type: 'text',
-      text: `Use OpenClaw tools to complete this browser task. Prefer annotate_page, click_ref, type_ref, and extract_schema. Goal: ${goal}`,
+      text: `Use AgentBridge tools to complete this browser task. Prefer annotate_page, click_ref, type_ref, and extract_schema. Goal: ${goal}`,
     },
   }],
 }));
